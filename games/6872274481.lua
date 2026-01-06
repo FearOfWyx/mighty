@@ -1,4 +1,5 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -17304,7 +17305,7 @@ run(function()
 	end
 	
 	StaffDetector = vape.Categories.Utility:CreateModule({
-		Name = 'Staff Detector',
+		Name = 'StaffDetector',
 		Function = function(callback)
 			if callback then
 				StaffDetector:Clean(playersService.PlayerAdded:Connect(playerAdded))
