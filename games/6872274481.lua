@@ -8600,30 +8600,6 @@ run(function()
                     nametag.Boots.Image = bedwars.getIcon(inventory.armor[6] or {itemType = ''}, true)
                     nametag.Kit.Image = kit and kit ~= 'none' and bedwars.BedwarsKitMeta[kit].renderImage or ''
                 end
-                
-                if ShowKits.Enabled and ent.Player then
-                    local kitIcon = nametag:FindFirstChild('KitIcon')
-                    if not kitIcon then
-                        kitIcon = Instance.new('ImageLabel')
-                        kitIcon.Name = 'KitIcon'
-                        kitIcon.Size = UDim2.fromOffset(30, 30)
-                        kitIcon.Position = UDim2.fromOffset(0, -35)
-                        kitIcon.BackgroundTransparency = 1
-                        kitIcon.Parent = nametag
-                    end
-                    
-                    local kit = ent.Player:GetAttribute('PlayingAsKits') 
-                    if kit then
-                        local kitImage = kitImageIds[kit:lower()]
-                        if kitImage then
-                            kitIcon.Image = kitImage
-                        else
-                            kitIcon.Image = kitImageIds["none"]
-                        end
-                    else
-                        kitIcon.Image = kitImageIds["none"]
-                    end
-                end
     
                 local size = getfontsize(removeTags(Strings[ent]), nametag.TextSize, nametag.FontFace, Vector2.new(100000, 100000))
                 nametag.Size = UDim2.fromOffset(size.X + 8 + (ShowKits.Enabled and 35 or 0), size.Y + 7)
