@@ -70,7 +70,7 @@ end
 local function SecurityCheck(loginData)
     if not loginData or type(loginData) ~= "table" then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "error",
+            Title = "Security Error",
             Text = "wrong loadstring bitch. dm aero",
             Duration = 3
         })
@@ -82,7 +82,7 @@ local function SecurityCheck(loginData)
     
     if not inputUsername or not inputPassword then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "error", 
+            Title = "Security Error", 
             Text = "missing yo credentials fuck u doing? dm aero",
             Duration = 3
         })
@@ -94,7 +94,7 @@ local function SecurityCheck(loginData)
     local accounts = fetchAccounts()
     if not accounts then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "error",
+            Title = "Connection Error",
             Text = "failed to check if its yo account check your wifi it might be shitty. dm aero",
             Duration = 3
         })
@@ -113,7 +113,7 @@ local function SecurityCheck(loginData)
     
     if not accountFound then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "access denied",
+            Title = "Access Denied",
             Text = "wrong info dm 5qvx for access",
             Duration = 3
         })
@@ -122,8 +122,8 @@ local function SecurityCheck(loginData)
     
     if not accountActive then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "account inactive",
-            Text = "your account is currently inactive",
+            Title = "Account Inactive",
+            Text = "Your account is currently inactive.",
             Duration = 3
         })
         return false
