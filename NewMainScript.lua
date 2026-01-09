@@ -1,45 +1,56 @@
 local SecurityModule = {}
+
 local EXPECTED_REPO_OWNER = "poopparty"
 local EXPECTED_REPO_NAME = "poopparty"
 local ACCOUNT_SYSTEM_URL = "https://raw.githubusercontent.com/poopparty/whitelistcheck/main/AccountSystem.lua"
-local cloneref = cloneref or function(ref) return ref end
-local httpService = cloneref(game:GetService('HttpService'))
 
-if identifyexecutor then
-    local executor = ({identifyexecutor()})[1]
-    if table.find({'Xeno', 'Solara', 'Wave', 'Argon'}, executor) then
-        debug = table.clone(debug)
-        debug.getupvalue = nil
-        debug.getconstant = nil
-        debug.setstack = nil
-        getgenv().debug = debug
+local function getHWID()
+    local hwid = nil
+    
+    if gethwid then
+        hwid = gethwid()
+    elseif getexecutorname then
+        local executor_name = getexecutorname()
+        local unique_str = executor_name .. tostring(game:GetService("UserInputService"):GetGamepadState(Enum.UserInputType.Gamepad1))
+        hwid = game:GetService("HttpService"):GenerateGUID(false)
+        
+        if syn and syn.crypt and syn.crypt.hash then
+            hwid = syn.crypt.hash(unique_str)
+        elseif crypt and crypt.hash then
+            hwid = crypt.hash(unique_str)
+        end
     end
+    
+    if not hwid and game:GetService("RbxAnalyticsService") then
+        local success, result = pcall(function()
+            return game:GetService("RbxAnalyticsService"):GetClientId()
+        end)
+        if success and result then
+            hwid = result
+        end
+    end
+    
+    if not hwid then
+        hwid = tostring(math.random(100000, 999999)) .. tostring(os.time())
+    end
+    
+    return hwid
 end
 
-local canDebug = debug.getupvalue ~= nil
-
-local function clearSecurityFolderIfDifferent(username)
+local function clearSecurityFolder()
     if not isfolder('newvape/security') then
         makefolder('newvape/security')
         return
     end
     
-    if isfile('newvape/security/validated') then
-        local success, validationData = pcall(function()
-            return httpService:JSONDecode(readfile('newvape/security/validated'))
-        end)
-        
-        if not success or (validationData and validationData.username ~= username) then
-            for _, file in listfiles('newvape/security') do
-                if isfile(file) then
-                    delfile(file)
-                end
-            end
+    for _, file in listfiles('newvape/security') do
+        if isfile(file) then
+            delfile(file)
         end
     end
 end
 
-local function createValidationFile(username, repoInfo)
+local function createValidationFile(username, repoInfo, hwid)
     if not isfolder('newvape/security') then
         makefolder('newvape/security')
     end
@@ -50,10 +61,11 @@ local function createValidationFile(username, repoInfo)
         repo_owner = repoInfo.owner,
         repo_name = repoInfo.name,
         validated = true,
-        checksum = httpService:GenerateGUID(false)
+        hwid = hwid,
+        checksum = game:GetService("HttpService"):GenerateGUID(false)
     }
     
-    local encoded = httpService:JSONEncode(validationData)
+    local encoded = game:GetService("HttpService"):JSONEncode(validationData)
     writefile('newvape/security/validated', encoded)
     writefile('newvape/security/'..username, tostring(os.time()))
 end
@@ -84,7 +96,7 @@ end
 local function SecurityCheck(loginData)
     if not loginData or type(loginData) ~= "table" then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "Security Error",
+            Title = "error",
             Text = "wrong loadstring bitch. dm aero",
             Duration = 3
         })
@@ -96,19 +108,21 @@ local function SecurityCheck(loginData)
     
     if not inputUsername or not inputPassword then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "Security Error", 
+            Title = "error", 
             Text = "missing yo credentials fuck u doing? dm aero",
             Duration = 3
         })
         return false
     end
     
-    clearSecurityFolderIfDifferent(inputUsername)
+    clearSecurityFolder()
+    
+    local currentHWID = getHWID()
     
     local accounts = fetchAccounts()
     if not accounts then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "Connection Error",
+            Title = "error",
             Text = "failed to check if its yo account check your wifi it might be shitty. dm aero",
             Duration = 3
         })
@@ -117,17 +131,19 @@ local function SecurityCheck(loginData)
     
     local accountFound = false
     local accountActive = false
+    local accountHWID = nil
     for _, account in pairs(accounts) do
         if account.Username == inputUsername and account.Password == inputPassword then
             accountFound = true
             accountActive = account.IsActive == true
+            accountHWID = account.HWID
             break
         end
     end
     
     if not accountFound then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "Access Denied",
+            Title = "access denied",
             Text = "wrong info dm 5qvx for access",
             Duration = 3
         })
@@ -136,15 +152,33 @@ local function SecurityCheck(loginData)
     
     if not accountActive then
         game.StarterGui:SetCore("SendNotification", {
-            Title = "Account Inactive",
-            Text = "Your account is currently inactive.",
+            Title = "account inactive",
+            Text = "your account is currently inactive",
             Duration = 3
         })
         return false
     end
     
+    if not accountHWID or accountHWID == "" or accountHWID == "your-hwid-here" or accountHWID:find("hwid-here") then
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "no hwid set",
+            Text = "your account has no hwid set. contact aero to set it up",
+            Duration = 10
+        })
+        return false
+    end
+    
+    if currentHWID ~= accountHWID then
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "hwid mismatch",
+            Text = "this device is not authorized for this account",
+            Duration = 5
+        })
+        return false
+    end
+    
     local repoInfo = getRepoInfo()
-    createValidationFile(inputUsername, repoInfo)
+    createValidationFile(inputUsername, repoInfo, currentHWID)
     
     return true
 end
@@ -179,7 +213,7 @@ local function downloadFile(path, func)
             error(res)
         end
         if path:find('.lua') then
-            res = '\n'..res
+            res = '--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.\n'..res
         end
         writefile(path, res)
     end
@@ -190,13 +224,13 @@ local function wipeFolder(path)
     if not isfolder(path) then return end
     for _, file in listfiles(path) do
         if file:find('loader') then continue end
-        if isfile(file) and readfile(file):sub(1,1) == '\n' then
+        if isfile(file) and select(1, readfile(file):find('--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.')) == 1 then
             delfile(file)
         end
     end
 end
 
-for _, folder in {'newvape', 'newvape/games', 'newvape/profiles', 'newvape/assets', 'newvape/libraries', 'newvape/guis', 'newvape/security', 'newvape/cache'} do
+for _, folder in {'newvape', 'newvape/games', 'newvape/profiles', 'newvape/assets', 'newvape/libraries', 'newvape/guis', 'newvape/security'} do
     if not isfolder(folder) then
         makefolder(folder)
     end
@@ -209,31 +243,13 @@ if not shared.VapeDeveloper then
     local commit = subbed:find('currentOid')
     commit = commit and subbed:sub(commit + 13, commit + 52) or nil
     commit = commit and #commit == 40 and commit or 'main'
-    
-    local Updated = (commit == 'main' or (isfile('newvape/profiles/commit.txt') and readfile('newvape/profiles/commit.txt') or '') ~= commit)
-    
-    if Updated then
+    if commit == 'main' or (isfile('newvape/profiles/commit.txt') and readfile('newvape/profiles/commit.txt') or '') ~= commit then
         wipeFolder('newvape')
         wipeFolder('newvape/games')
         wipeFolder('newvape/guis')
         wipeFolder('newvape/libraries')
-        wipeFolder('newvape/cache')
     end
-    
-    if not canDebug and Updated then
-        local executor = identifyexecutor and ({identifyexecutor()})[1] or "Unknown"
-
-        pcall(function()
-            local req = httpService:JSONDecode(game:HttpGet('https://api.github.com/repos/'..EXPECTED_REPO_OWNER..'/'..EXPECTED_REPO_NAME..'/contents/cache'))
-            for _, v in req do
-                pcall(downloadFile, `newvape/{v.path}`)
-            end
-        end)
-    end
-    
     writefile('newvape/profiles/commit.txt', commit)
 end
-
-getgenv().canDebug = canDebug
 
 return loadstring(downloadFile('newvape/main.lua'), 'main')()
