@@ -5964,6 +5964,7 @@ run(function()
 	})
 end)
 
+
 run(function()
 	local TargetPart
 	local Targets
@@ -6122,7 +6123,7 @@ run(function()
 					end
 	
 					hovering = false
-					return 
+					return old(...)
 				end
 			else
 				bedwars.ProjectileController.calculateImportantLaunchValues = old
