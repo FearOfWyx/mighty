@@ -189,10 +189,6 @@ if not SecurityCheck(passedArgs) then
     return
 end
 
-if not isfolder('newvape/security') then
-    makefolder('newvape/security')
-end
-
 local isfile = isfile or function(file)
     local suc, res = pcall(function()
         return readfile(file)
