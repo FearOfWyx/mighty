@@ -1,6 +1,4 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 local run = function(func)
 	func()
 end
@@ -26,7 +24,6 @@ local contextActionService = cloneref(game:GetService('ContextActionService'))
 local guiService = cloneref(game:GetService('GuiService'))
 local coreGui = cloneref(game:GetService('CoreGui'))
 local starterGui = cloneref(game:GetService('StarterGui'))
-
 local isnetworkowner = identifyexecutor and table.find({'AWP', 'Nihon'}, ({identifyexecutor()})[1]) and isnetworkowner or function()
 	return true
 end
@@ -2355,8 +2352,8 @@ run(function()
 end)
 
 run(function()
-    local oldranks = {}
-    local activeLoops = {}
+    local activeConnections = {}
+    local kitLabels = {}
     local updateDebounce = {}
     
     KitRender = vape.Categories.Utility:CreateModule({
@@ -2364,109 +2361,134 @@ run(function()
         Function = function(callback)   
             if callback then
                 task.spawn(function()
-                    local teams = lplr.PlayerGui:WaitForChild("MatchDraftApp")
-                    if teams then
-                        local retries = 0
-                        local foundPlayerRender = false
-                        
-                        while retries < 20 and not foundPlayerRender and KitRender.Enabled do
-                            for _, obj in teams:GetDescendants() do
-                                if obj.Name == "PlayerRender" then
-                                    foundPlayerRender = true
-                                    break
-                                end
-                            end
-                            if not foundPlayerRender then
-                                task.wait(0.25)
-                                retries += 1
-                            end
-                        end
-                        
-                        if not foundPlayerRender then
-                            warn("KitRender: No PlayerRender elements found after waiting")
-                            return
-                        end
-                        
-                        local function setupKitRender(obj)
-                            if obj.Name == "PlayerRender" and obj.Parent.Parent.Parent.Parent.Parent.Name == "MatchDraftTeamCardRow" then
-                                local Rank = obj.Parent:FindFirstChild('3')
-                                if not Rank then return end
-                                
-                                local userId = string.match(obj.Image, "id=(%d+)")
-                                if not userId then return end
-                                
-                                obj:SetAttribute("AeroV4KitRenderUserID", tonumber(userId))
-                                local id = tonumber(userId)
-                                local plr = playersService:GetPlayerByUserId(id)
-                                
-                                if not plr then return end
-                                
-                                local loopKey = plr.UserId
-                                
-                                if activeLoops[loopKey] then
-                                    activeLoops[loopKey] = nil
-                                end
-                                
-                                local render = bedwars.BedwarsKitMeta[plr:GetAttribute("PlayingAsKits")] or bedwars.BedwarsKitMeta.none
-                                if not oldranks[Rank] then
-                                    oldranks[Rank] = Rank.Image
-                                end
-                                Rank.Image = render.renderImage
-                                Rank:SetAttribute("AeroV4KitRenderWM", true)
-                                
-                                activeLoops[loopKey] = true
-                                
-                                KitRender:Clean(plr:GetAttributeChangedSignal("PlayingAsKits"):Connect(function()
-                                    if not activeLoops[loopKey] or not KitRender.Enabled then return end
-                                    
-                                    local currentTick = tick()
-                                    
-                                    if not updateDebounce[loopKey] or (currentTick - updateDebounce[loopKey]) >= 0.1 then
-                                        updateDebounce[loopKey] = currentTick
-                                        
-                                        if Rank and Rank.Parent then
-                                            render = bedwars.BedwarsKitMeta[plr:GetAttribute("PlayingAsKits")] or bedwars.BedwarsKitMeta.none
-                                            Rank.Image = render.renderImage
-                                        else
-                                            activeLoops[loopKey] = nil
-                                            updateDebounce[loopKey] = nil
-                                        end
-                                    end
-                                end))
-                            end
-                        end
-                        
-                        for i, obj in teams:GetDescendants() do
-                            if KitRender.Enabled then
-                                setupKitRender(obj)
-                            end
-                        end
-                        
-                        KitRender:Clean(teams.DescendantAdded:Connect(function(obj)
-                            if KitRender.Enabled then
-                                setupKitRender(obj)
-                            end
-                        end))
+                    local teams = lplr.PlayerGui:FindFirstChild("MatchDraftApp")
+                    if not teams then
+                        warn("KitRender: MatchDraftApp not found")
+                        return
                     end
+                    
+                    local function createKitLabel(parent, kitImage)
+                        if kitLabels[parent] then
+                            kitLabels[parent]:Destroy()
+                        end
+                        
+                        local kitLabel = Instance.new("ImageLabel")
+                        kitLabel.Name = "AeroV4KitIcon"
+                        kitLabel.Size = UDim2.new(1, 0, 1, 0)
+                        kitLabel.Position = UDim2.new(1.1, 0, 0, 0)
+                        kitLabel.BackgroundTransparency = 1
+                        kitLabel.Image = kitImage
+                        kitLabel.Parent = parent
+                        
+                        kitLabels[parent] = kitLabel
+                        return kitLabel
+                    end
+                    
+                    local function setupKitRender(obj)
+                        if obj.Name == "PlayerRender" and obj.Parent and obj.Parent.Parent and obj.Parent.Parent.Parent and obj.Parent.Parent.Parent.Parent and obj.Parent.Parent.Parent.Parent.Parent and obj.Parent.Parent.Parent.Parent.Parent.Name == "MatchDraftTeamCardRow" then
+                            local Rank = obj.Parent:FindFirstChild('3')
+                            if not Rank then return end
+                            
+                            if kitLabels[Rank] then
+                                return
+                            end
+                            
+                            local userId = string.match(obj.Image, "id=(%d+)")
+                            if not userId then return end
+                            
+                            local id = tonumber(userId)
+                            if not id then return end
+                            
+                            local plr = playersService:GetPlayerByUserId(id)
+                            if not plr then return end
+                            
+                            local loopKey = plr.UserId
+                            
+                            if activeConnections[loopKey] then
+                                activeConnections[loopKey]:Disconnect()
+                                activeConnections[loopKey] = nil
+                            end
+                            
+                            local function updateKit()
+                                if not KitRender.Enabled then return end
+                                if not Rank or not Rank.Parent then
+                                    if activeConnections[loopKey] then
+                                        activeConnections[loopKey]:Disconnect()
+                                        activeConnections[loopKey] = nil
+                                    end
+                                    if kitLabels[Rank] then
+                                        kitLabels[Rank]:Destroy()
+                                        kitLabels[Rank] = nil
+                                    end
+                                    return
+                                end
+                                
+                                local kitName = plr:GetAttribute("PlayingAsKits")
+                                if not kitName then
+                                    kitName = "none"
+                                end
+                                
+                                local render = bedwars.BedwarsKitMeta[kitName] or bedwars.BedwarsKitMeta.none
+                                
+                                if kitLabels[Rank] then
+                                    kitLabels[Rank].Image = render.renderImage
+                                else
+                                    createKitLabel(Rank, render.renderImage)
+                                end
+                            end
+                            
+                            updateKit()
+                            
+                            local connection = plr:GetAttributeChangedSignal("PlayingAsKits"):Connect(function()
+                                local currentTick = tick()
+                                
+                                if not updateDebounce[loopKey] or (currentTick - updateDebounce[loopKey]) >= 0.1 then
+                                    updateDebounce[loopKey] = currentTick
+                                    updateKit()
+                                end
+                            end)
+                            
+                            activeConnections[loopKey] = connection
+                            KitRender:Clean(connection)
+                        end
+                    end
+                    
+                    task.wait(0.5)
+                    
+                    for _, obj in teams:GetDescendants() do
+                        if KitRender.Enabled then
+                            task.spawn(function()
+                                setupKitRender(obj)
+                            end)
+                        end
+                    end
+                    
+                    KitRender:Clean(teams.DescendantAdded:Connect(function(obj)
+                        if KitRender.Enabled then
+                            task.wait(0.1)
+                            setupKitRender(obj)
+                        end
+                    end))
                 end)
             else
-                for key, _ in pairs(activeLoops) do
-                    activeLoops[key] = nil
-                end
-                table.clear(updateDebounce)
-                
-                for i, v in lplr.PlayerGui.MatchDraftApp:GetDescendants() do
-                    if v:GetAttribute("AeroV4KitRenderWM") then
-                        if oldranks[v] then
-                            v.Image = oldranks[v]
-                        end
-                        oldranks[v] = nil
-                        v:SetAttribute("AeroV4KitRenderWM", nil)
+                for key, connection in pairs(activeConnections) do
+                    if connection then
+                        connection:Disconnect()
                     end
+                    activeConnections[key] = nil
                 end
+                
+                for parent, label in pairs(kitLabels) do
+                    if label then
+                        label:Destroy()
+                    end
+                    kitLabels[parent] = nil
+                end
+                
+                table.clear(updateDebounce)
             end
         end,
-        Tooltip = "Allows you to see everyone's kit during kit phase (squads ranked!)"
+        Tooltip = "Shows everyone's kit next to their rank during kit phase (squads ranked!)"
     })
 end)
 	
@@ -3574,7 +3596,6 @@ run(function()
 	local Mode
 	local Expand
 	local AutoToggle
-	local AutoToggleProjectiles
 	local objects, set = {}
 	local lastToolType = nil
 	local autoToggleConnection = nil
@@ -3626,26 +3647,15 @@ run(function()
 		return toolType == 'block'
 	end
 	
-	local function shouldDisableHitbox()
-		if AutoToggleProjectiles.Enabled and isProjectile() then
-			return true
-		end
-		if isBlock() then
-			return true
-		end
-		return false
-	end
-	
 	local function handleAutoToggle()
 		if not AutoToggle.Enabled or Mode.Value ~= 'Player' then return end
 		
-		local shouldBeDisabled = shouldDisableHitbox()
-		local currentState = not shouldBeDisabled
+		local shouldBeEnabled = isSword()
 		
-		if currentState ~= lastToolType then
-			lastToolType = currentState
+		if shouldBeEnabled ~= lastToolType then
+			lastToolType = shouldBeEnabled
 			
-			if currentState then
+			if shouldBeEnabled then
 				if not HitBoxes.Enabled then
 					HitBoxes:Toggle()
 				end
@@ -3701,9 +3711,6 @@ run(function()
 			if AutoToggle then
 				AutoToggle.Object.Visible = (val == 'Player')
 			end
-			if AutoToggleProjectiles then
-				AutoToggleProjectiles.Object.Visible = (val == 'Player')
-			end
 			if HitBoxes.Enabled then
 				HitBoxes:Toggle()
 				HitBoxes:Toggle()
@@ -3738,7 +3745,7 @@ run(function()
 		Name = 'Auto Toggle',
 		Default = false,
 		Visible = false,
-		Tooltip = 'Auto disables hitbox when holding blocks or projectiles',
+		Tooltip = 'Only enables hitbox when holding a sword (disables for blocks/projectiles)',
 		Function = function(callback)
 			if callback then
 				if autoToggleConnection then
@@ -3757,22 +3764,9 @@ run(function()
 		end
 	})
 	
-	AutoToggleProjectiles = HitBoxes:CreateToggle({
-		Name = 'Projectile Toggle',
-		Default = true,
-		Visible = false,
-		Tooltip = 'Disables hitbox when holding projectile weapons to prevent ghosting',
-		Function = function(callback)
-			if AutoToggle.Enabled then
-				handleAutoToggle()
-			end
-		end
-	})
-	
 	task.spawn(function()
 		repeat task.wait() until Mode.Value
 		AutoToggle.Object.Visible = (Mode.Value == 'Player')
-		AutoToggleProjectiles.Object.Visible = (Mode.Value == 'Player')
 	end)
 end)
 	
@@ -8194,6 +8188,10 @@ run(function()
                                     hiddenModels[model] = true
                                     
                                     for _, part in model:GetDescendants() do
+                                        if part.Name == "Nametag" and part.Parent and part.Parent.Name == "Head" then
+                                            continue
+                                        end
+                                        
                                         if part:IsA("BasePart") then
                                             originalProperties[part] = {
                                                 Transparency = part.Transparency,
@@ -9622,7 +9620,7 @@ run(function()
                 kitIcon.Image = ''
                 
                 if Equipment.Enabled then
-                    kitIcon.Position = UDim2.fromOffset(90, -30)
+                    kitIcon.Position = UDim2.fromOffset(110, -30)
                 else
                     kitIcon.Position = UDim2.new(0.5, 0, 0, -35)
                 end
@@ -9770,7 +9768,7 @@ run(function()
                     end
                     
                     if Equipment.Enabled then
-                        kitIcon.Position = UDim2.fromOffset(90, -30)
+                        kitIcon.Position = UDim2.fromOffset(110, -30)
                     else
                         kitIcon.Position = UDim2.new(0.5, 0, 0, -35)
                     end
@@ -9870,7 +9868,7 @@ run(function()
                 local kitIcon = nametag:FindFirstChild('KitIcon')
                 if ShowKits.Enabled and kitIcon then
                     if Equipment.Enabled then
-                        kitIcon.Position = UDim2.fromOffset(90, -30)
+                        kitIcon.Position = UDim2.fromOffset(110, -30)
                     else
                         kitIcon.Position = UDim2.new(0.5, 0, 0, -35)
                     end
@@ -15328,9 +15326,35 @@ run(function()
 	local BreakClosestBlock
 	local MouseDown
 	local NukeTeslas
+	local NukeBeehives
 	local customlist, parts = {}, {}
 	local lastPlayerPosition = nil
 	local currentTargetBlock = nil
+	local collectionService = game:GetService("CollectionService")
+
+	local function getSwordSlot()
+		for i, v in store.inventory.hotbar do
+			if v.item and bedwars.ItemMeta[v.item.itemType] then
+				local meta = bedwars.ItemMeta[v.item.itemType]
+				if meta.sword then
+					return i - 1
+				end
+			end
+		end
+		return nil
+	end
+
+	local function getPickaxeSlot()
+		for i, v in store.inventory.hotbar do
+			if v.item and bedwars.ItemMeta[v.item.itemType] then
+				local meta = bedwars.ItemMeta[v.item.itemType]
+				if meta.breakBlock then
+					return i - 1
+				end
+			end
+		end
+		return nil
+	end
 	
 	local function customHealthbar(self, blockRef, health, maxHealth, changeHealth, block)
 		if block:GetAttribute('NoHealthbar') then return end
@@ -15515,7 +15539,7 @@ run(function()
 	end
 	
 	local function attemptBreak(tab, localPosition, isBed)
-		if not tab then return end
+		if not tab then return false end
 		if MouseDown.Enabled and not inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
 			return false
 		end
@@ -15529,6 +15553,11 @@ run(function()
 				if not SelfBreak.Enabled and v:GetAttribute('PlacedByUserId') == lplr.UserId then continue end
 				if (v:GetAttribute('BedShieldEndTime') or 0) > workspace:GetServerTimeNow() then continue end
 				if LimitItem.Enabled and not (store.hand.tool and bedwars.ItemMeta[store.hand.tool.Name].breakBlock) then continue end
+				if SelfBreak.Enabled and v:GetAttribute('PlacedByUserId') == lplr.UserId then
+					if v:GetAttribute('NoBreak') or v.Name == 'bed' or v.Name == 'team_chest' then
+						continue
+					end
+				end
 
 				if isBed and BreakClosestBlock.Enabled then
 					hit += 1
@@ -15536,16 +15565,27 @@ run(function()
 					local hasPath, blockingPos = hasDirectPathToBed(v.Position, localPosition)
 					
 					if hasPath then
-						local target, path, endpos = bedwars.breakBlock(v, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, AutoTool.Enabled)
-						if path then
-							local currentnode = target
-							for _, part in parts do
-								part.Position = currentnode or Vector3.zero
-								if currentnode then
-									part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
-								end
-								currentnode = path[currentnode]
+						local success, result = pcall(function()
+							return bedwars.breakBlock(v, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, AutoTool.Enabled)
+						end)
+						
+						if success then
+							local target, path, endpos = result, nil, nil
+							if type(result) == "table" then
+								target, path, endpos = unpack(result)
 							end
+							if path then
+								local currentnode = target
+								for _, part in parts do
+									part.Position = currentnode or Vector3.zero
+									if currentnode then
+										part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
+									end
+									currentnode = path[currentnode]
+								end
+							end
+						else
+							warn("failed to break block:", result)
 						end
 						task.wait(Delay.Value)
 						return true
@@ -15560,15 +15600,24 @@ run(function()
 						local closestBlock, closestPos, closestNormal = findClosestBlockInPath(v.Position, localPosition)
 						
 						if closestBlock and closestPos then
-							local target, path, endpos = bedwars.breakBlock(closestBlock, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, AutoTool.Enabled)
-							if path then
-								local currentnode = target
-								for _, part in parts do
-									part.Position = currentnode or Vector3.zero
-									if currentnode then
-										part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
+							local success, result = pcall(function()
+								return bedwars.breakBlock(closestBlock, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, AutoTool.Enabled)
+							end)
+							
+							if success then
+								local target, path, endpos = result, nil, nil
+								if type(result) == "table" then
+									target, path, endpos = unpack(result)
+								end
+								if path then
+									local currentnode = target
+									for _, part in parts do
+										part.Position = currentnode or Vector3.zero
+										if currentnode then
+											part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
+										end
+										currentnode = path[currentnode]
 									end
-									currentnode = path[currentnode]
 								end
 							end
 							task.wait(Delay.Value)
@@ -15577,16 +15626,27 @@ run(function()
 					end
 				else
 					hit += 1
-					local target, path, endpos = bedwars.breakBlock(v, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, AutoTool.Enabled)
-					if path then
-						local currentnode = target
-						for _, part in parts do
-							part.Position = currentnode or Vector3.zero
-							if currentnode then
-								part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
-							end
-							currentnode = path[currentnode]
+					local success, result = pcall(function()
+						return bedwars.breakBlock(v, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, AutoTool.Enabled)
+					end)
+					
+					if success then
+						local target, path, endpos = result, nil, nil
+						if type(result) == "table" then
+							target, path, endpos = unpack(result)
 						end
+						if path then
+							local currentnode = target
+							for _, part in parts do
+								part.Position = currentnode or Vector3.zero
+								if currentnode then
+									part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
+								end
+								currentnode = path[currentnode]
+							end
+						end
+					else
+						warn("failed to break block:", result)
 					end
 					task.wait(Delay.Value)
 					return true
@@ -15596,12 +15656,27 @@ run(function()
 
 		return false
 	end
-	
+
 	local function attemptBreakTeslas(localPosition)
 		if not NukeTeslas.Enabled then return false end
+		if MouseDown.Enabled and not inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+			return false
+		end
+		
+		local teslaFolder = workspace:FindFirstChild("Map")
+		if not teslaFolder then return false end
+		
+		teslaFolder = teslaFolder:FindFirstChild("Worlds")
+		if not teslaFolder then return false end
+		
+		teslaFolder = teslaFolder:FindFirstChild("tr_Range")
+		if not teslaFolder then return false end
+		
+		teslaFolder = teslaFolder:FindFirstChild("Blocks")
+		if not teslaFolder then return false end
 		
 		local teslas = {}
-		for _, obj in pairs(workspace:GetDescendants()) do
+		for _, obj in teslaFolder:GetChildren() do
 			if obj:IsA("BasePart") and obj.Name == "tesla_trap" then
 				table.insert(teslas, obj)
 			end
@@ -15617,18 +15692,130 @@ run(function()
 			if (tesla.Position - localPosition).Magnitude < Range.Value then
 				local block = getPlacedBlock(tesla.Position)
 				if block and bedwars.BlockController:isBlockBreakable({blockPosition = tesla.Position / 3}, lplr) then
+					if not SelfBreak.Enabled and block:GetAttribute('PlacedByUserId') == lplr.UserId then continue end
+					if (block:GetAttribute('BedShieldEndTime') or 0) > workspace:GetServerTimeNow() then continue end
+					if LimitItem.Enabled and not (store.hand.tool and bedwars.ItemMeta[store.hand.tool.Name].breakBlock) then continue end
+					
 					hit += 1
-					local target, path, endpos = bedwars.breakBlock(block, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, AutoTool.Enabled)
-					if path then
-						local currentnode = target
-						for _, part in parts do
-							part.Position = currentnode or Vector3.zero
-							if currentnode then
-								part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
-							end
-							currentnode = path[currentnode]
+					
+					local handItem = store.inventory.inventory.hand
+					local alreadyHoldingPick = false
+					if handItem then
+						local itemMeta = bedwars.ItemMeta[handItem.itemType]
+						if itemMeta and itemMeta.breakBlock then
+							alreadyHoldingPick = true
 						end
 					end
+					
+					if not alreadyHoldingPick then
+						local pickaxeSlot = getPickaxeSlot()
+						if pickaxeSlot and hotbarSwitch(pickaxeSlot) then
+							task.wait(0.05)
+						end
+					end
+					
+					local success, result = pcall(function()
+						return bedwars.breakBlock(block, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, false)
+					end)
+					
+					if success then
+						local target, path, endpos = result, nil, nil
+						if type(result) == "table" then
+							target, path, endpos = unpack(result)
+						end
+						if path then
+							local currentnode = target
+							for _, part in parts do
+								part.Position = currentnode or Vector3.zero
+								if currentnode then
+									part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
+								end
+								currentnode = path[currentnode]
+							end
+						end
+					end
+					
+					task.wait(Delay.Value)
+					return true
+				end
+			end
+		end
+		
+		return false
+	end
+
+	local function attemptBreakBeehives(localPosition)
+		if not NukeBeehives.Enabled then return false end
+		if MouseDown.Enabled and not inputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+			return false
+		end
+		
+		local beehives = {}
+		local success, result = pcall(function()
+			return collectionService:GetTagged('beehive')
+		end)
+		
+		if not success or not result then return false end
+		
+		for _, beehive in result do
+			if beehive:IsA("BasePart") then
+				table.insert(beehives, beehive)
+			end
+		end
+		
+		if #beehives == 0 then return false end
+		
+		table.sort(beehives, function(a, b)
+			return (a.Position - localPosition).Magnitude < (b.Position - localPosition).Magnitude
+		end)
+		
+		for _, beehive in beehives do
+			if (beehive.Position - localPosition).Magnitude < Range.Value then
+				local block = getPlacedBlock(beehive.Position)
+				if block and bedwars.BlockController:isBlockBreakable({blockPosition = beehive.Position / 3}, lplr) then
+					if not SelfBreak.Enabled and block:GetAttribute('PlacedByUserId') == lplr.UserId then continue end
+					if (block:GetAttribute('BedShieldEndTime') or 0) > workspace:GetServerTimeNow() then continue end
+					if LimitItem.Enabled and not (store.hand.tool and bedwars.ItemMeta[store.hand.tool.Name].breakBlock) then continue end
+					
+					hit += 1
+					
+					local handItem = store.inventory.inventory.hand
+					local alreadyHoldingPick = false
+					if handItem then
+						local itemMeta = bedwars.ItemMeta[handItem.itemType]
+						if itemMeta and itemMeta.breakBlock then
+							alreadyHoldingPick = true
+						end
+					end
+					
+					if not alreadyHoldingPick then
+						local pickaxeSlot = getPickaxeSlot()
+						if pickaxeSlot and hotbarSwitch(pickaxeSlot) then
+							task.wait(0.05)
+						end
+					end
+					
+					local success, result = pcall(function()
+						return bedwars.breakBlock(block, Effect.Enabled, Animation.Enabled, CustomHealth.Enabled and customHealthbar or nil, false)
+					end)
+					
+					if success then
+						local target, path, endpos = result, nil, nil
+						if type(result) == "table" then
+							target, path, endpos = unpack(result)
+						end
+						if path then
+							local currentnode = target
+							for _, part in parts do
+								part.Position = currentnode or Vector3.zero
+								if currentnode then
+									part.BoxHandleAdornment.Color3 = currentnode == endpos and Color3.new(1, 0.2, 0.2) or currentnode == target and Color3.new(0.2, 0.2, 1) or Color3.new(0.2, 1, 0.2)
+								end
+								currentnode = path[currentnode]
+							end
+						end
+					end
+					
 					task.wait(Delay.Value)
 					return true
 				end
@@ -15669,20 +15856,27 @@ run(function()
 				end)
 
 				repeat
-					task.wait(1 / UpdateRate.Value)
-					if not Breaker.Enabled then break end
-					if entitylib.isAlive then
-						local localPosition = entitylib.character.RootPart.Position
-	
-						if attemptBreakTeslas(localPosition) then continue end
-						if attemptBreak(Bed.Enabled and beds, localPosition, true) then continue end
-						if attemptBreak(customlist, localPosition, false) then continue end
-						if attemptBreak(LuckyBlock.Enabled and luckyblock, localPosition, false) then continue end
-						if attemptBreak(IronOre.Enabled and ironores, localPosition, false) then continue end
-	
-						for _, v in parts do
-							v.Position = Vector3.zero
+					local success, err = pcall(function()
+						task.wait(1 / UpdateRate.Value)
+						if not Breaker.Enabled then return end
+						if entitylib.isAlive then
+							local localPosition = entitylib.character.RootPart.Position
+
+							if attemptBreakTeslas(localPosition) then return end
+							if attemptBreakBeehives(localPosition) then return end
+							if attemptBreak(Bed.Enabled and beds, localPosition, true) then return end
+							if attemptBreak(customlist, localPosition, false) then return end
+							if attemptBreak(LuckyBlock.Enabled and luckyblock, localPosition, false) then return end
+							if attemptBreak(IronOre.Enabled and ironores, localPosition, false) then return end
+
+							for _, v in parts do
+								v.Position = Vector3.zero
+							end
 						end
+					end)
+					
+					if not success then
+						warn("Breaker error:", err)
 					end
 				until not Breaker.Enabled
 			else
@@ -15736,6 +15930,11 @@ run(function()
 	NukeTeslas = Breaker:CreateToggle({
 		Name = 'Nuke Teslas',
 		Tooltip = 'Breaks tesla traps (highest priority)',
+		Default = false
+	})
+	NukeBeehives = Breaker:CreateToggle({
+		Name = 'Nuke Beehives',
+		Tooltip = 'Breaks beehives (2nd priority)',
 		Default = false
 	})
 	Bed = Breaker:CreateToggle({
@@ -16220,6 +16419,8 @@ run(function()
 					end
 				end
 
+				-- REMOVED NAMETAG 
+				--[[
 				if not nametagHooked then
 					originalAddGameNametag = bedwars.NametagController.addGameNametag
 					bedwars.NametagController.addGameNametag = function(player, ...)
@@ -16253,6 +16454,7 @@ run(function()
 						end
 					end
 				end
+				]]--
 			else
 				for i, v in effects do 
 					bedwars.KillEffectController.killEffects[i] = v 
@@ -22466,7 +22668,7 @@ run(function()
 	local originalTextures = {}
 	
 	local function removeTextures(obj)
-		if obj.Name == "Nametag" and obj.Parent and obj.Parent.Parent == lplr.Character then
+		if obj.Name == "Nametag" and obj.Parent and obj.Parent.Name == "Head" then
 			return
 		end
 		
@@ -24557,7 +24759,6 @@ run(function()
     local MinigameAnimationToggle
     local FishermanSpyToggle
     local IgnoreTeammatesToggle
-    local ShowLootToggle
     local ESPToggle
     local ESPNotify
     local ESPBackground
@@ -24585,8 +24786,6 @@ run(function()
     local autoMinigameActive = false
     local pullAnimationTrack = nil
     local successAnimationTrack = nil
-    local playerBobberTracking = {}
-    local fishingPlayers = {}
     
     local function processNotificationQueue()
         while #notificationQueue > 0 do
@@ -24685,101 +24884,24 @@ run(function()
     end
     
     local function setupFishermanSpy()
-        local bobberAddedConnection = workspace.DescendantAdded:Connect(function(descendant)
-            if not FishermanSpyToggle.Enabled then return end
-            if descendant.Name ~= "fisherman_bobber" then return end
-            
-            task.wait(0.1) 
-            
-            local shooterId = descendant:GetAttribute("ProjectileShooter")
-            if not shooterId or shooterId == lplr.UserId then return end
-            
-            local player = Players:GetPlayerByUserId(shooterId)
-            if not player then return end
-            
-            if IgnoreTeammatesToggle.Enabled and player.Team == lplr.Team then
-                return
-            end
-            
-            notif('Fisherman Spy', player.Name .. ' is fishing!', 3)
-            
-            playerBobberTracking[descendant] = {
-                player = player,
-                userId = shooterId,
-                addedTime = tick()
-            }
-            fishingPlayers[shooterId] = true
-        end)
-        
-        local bobberRemovedConnection = workspace.DescendantRemoving:Connect(function(descendant)
-            if not FishermanSpyToggle.Enabled then return end
-            if descendant.Name ~= "fisherman_bobber" then return end
-            
-            local trackingData = playerBobberTracking[descendant]
-            if not trackingData then return end
-            
-            trackingData.removedTime = tick()
-        end)
-        
-        local fishDetectorConnection = workspace.DescendantAdded:Connect(function(descendant)
-            if not FishermanSpyToggle.Enabled then return end
-            
-            local itemName = descendant.Name
-            
-            if not fishNames[itemName] then return end
-            
-            local mostRecentPlayer = nil
-            local mostRecentTime = 0
-            
-            for bobber, data in pairs(playerBobberTracking) do
-                if data.removedTime and data.removedTime > mostRecentTime then
-                    if tick() - data.removedTime < 2 then
-                        mostRecentTime = data.removedTime
-                        mostRecentPlayer = data.player
+        bedwars.Client:WaitFor("FishCaught"):andThen(function(rbx)
+            Fisherman:Clean(rbx:Connect(function(tbl)
+                local char = tbl.catchingPlayer.Character
+                local fish = tbl.dropData.fishModel
+                local plrName = char.Name
+                local str = plrName:sub(1, 1):upper()..plrName:sub(2) or 'NIL'
+                local strfish = fishNames[tostring(fish)] or 'NIL Fish'
+                if IgnoreTeammatesToggle.Enabled then
+                    local currentTeam = lplr.Team
+                    local currentplr = playersService:GetPlayerFromCharacter(char)
+                    if currentplr.Team == currentTeam then
+                    else
+                        notif("FishermanSpy",`{str} has caught an {strfish}`,8)
                     end
+                else
+                    notif("FishermanSpy",`{str} has caught an {strfish}`,8)
                 end
-            end
-            
-            if mostRecentPlayer then
-                local fishType = fishNames[itemName]
-                
-                local message = mostRecentPlayer.Name .. ' caught a ' .. fishType
-                if ShowLootToggle.Enabled then
-                    message = message .. ' (' .. itemName .. ')'
-                end
-                
-                notif('Fisherman Spy', message, 5)
-                
-                for bobber, data in pairs(playerBobberTracking) do
-                    if data.player == mostRecentPlayer then
-                        playerBobberTracking[bobber] = nil
-                    end
-                end
-                fishingPlayers[mostRecentPlayer.UserId] = nil
-            end
-        end)
-        
-        local cleanupTask = task.spawn(function()
-            while Fisherman.Enabled and FishermanSpyToggle.Enabled do
-                task.wait(5)
-                
-                local currentTime = tick()
-                for bobber, data in pairs(playerBobberTracking) do
-                    if data.addedTime and currentTime - data.addedTime > 5 then
-                        playerBobberTracking[bobber] = nil
-                        if data.userId then
-                            fishingPlayers[data.userId] = nil
-                        end
-                    end
-                end
-            end
-        end)
-        
-        Fisherman:Clean(bobberAddedConnection)
-        Fisherman:Clean(bobberRemovedConnection)
-        Fisherman:Clean(fishDetectorConnection)
-        Fisherman:Clean(function()
-            task.cancel(cleanupTask)
+            end))
         end)
     end
     
@@ -24823,8 +24945,6 @@ run(function()
                 Folder:ClearAllChildren()
                 table.clear(Reference)
                 table.clear(notificationQueue)
-                table.clear(playerBobberTracking)
-                table.clear(fishingPlayers)
             end
         end,
         Tooltip = 'All-in-one Fisherman module'
@@ -24879,13 +24999,10 @@ run(function()
     FishermanSpyToggle = Fisherman:CreateToggle({
         Name = 'Fisherman Spy',
         Default = false,
-        Tooltip = 'See what other players catch',
+        Tooltip = 'notifys whenever a fisher has caught something',
         Function = function(callback)
             if IgnoreTeammatesToggle and IgnoreTeammatesToggle.Object then 
                 IgnoreTeammatesToggle.Object.Visible = callback 
-            end
-            if ShowLootToggle and ShowLootToggle.Object then 
-                ShowLootToggle.Object.Visible = callback 
             end
             
             if Fisherman.Enabled and callback then
@@ -24897,8 +25014,7 @@ run(function()
     IgnoreTeammatesToggle = Fisherman:CreateToggle({
         Name = 'Ignore Teammates',
         Default = true,
-        Visible = false,
-        Tooltip = 'Only notifes 4 enemy'
+        Visible = false
     })
     
     ESPToggle = Fisherman:CreateToggle({
@@ -32045,3 +32161,4 @@ run(function()
         Visible = false
     })
 end)
+
