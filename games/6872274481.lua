@@ -32107,4 +32107,1465 @@ run(function()
                     v.Frame.BackgroundColor3 = Color3.fromHSV(hue, sat, val)
                     v.Frame.BackgroundTransparency = 1 - opacity
                 end
-           
+            end
+        end,
+        Darker = true
+    })
+end)
+
+run(function()
+    local Nazar
+    local AutoEmpower
+    local EmpowerTimeout
+    local AutoConsume
+    local HealThreshold
+    local MinLifeForce
+    local ConsumeDelay
+    
+    local empoweredMode = false
+    local lastHitTime = 0
+    local lastConsumeTime = 0
+    
+    local function enableEmpower()
+        if not empoweredMode and bedwars.AbilityController:canUseAbility('enable_life_force_attack') then
+            bedwars.AbilityController:useAbility('enable_life_force_attack')
+            empoweredMode = true
+        end
+    end
+    
+    local function disableEmpower()
+        if empoweredMode and bedwars.AbilityController:canUseAbility('disable_life_force_attack') then
+            bedwars.AbilityController:useAbility('disable_life_force_attack')
+            empoweredMode = false
+        end
+    end
+    
+    local function tryConsumeLifeForce()
+        if not entitylib.isAlive then return end
+        
+        local currentTime = workspace:GetServerTimeNow()
+        
+        if (currentTime - lastConsumeTime) < ConsumeDelay.Value then
+            return
+        end
+        
+        local health = lplr.Character:GetAttribute('Health') or 100
+        local maxHealth = lplr.Character:GetAttribute('MaxHealth') or 100
+        local lifeForce = lplr:GetAttribute('LifeForce') or 0
+        
+        local healthPercent = health / maxHealth
+        
+        if healthPercent < (HealThreshold.Value / 100) and lifeForce >= MinLifeForce.Value and health < maxHealth then
+            if bedwars.AbilityController:canUseAbility('consume_life_foce') then
+                bedwars.AbilityController:useAbility('consume_life_foce')
+                lastConsumeTime = currentTime
+            end
+        end
+    end
+    
+    Nazar = vape.Categories.Kits:CreateModule({
+        Name = 'Nazar',
+        Function = function(callback)
+            if callback then
+                Nazar:Clean(vapeEvents.EntityDamageEvent.Event:Connect(function(damageTable)
+                    if not entitylib.isAlive or not AutoEmpower.Enabled then return end
+                    
+                    local attacker = playersService:GetPlayerFromCharacter(damageTable.fromEntity)
+                    local victim = playersService:GetPlayerFromCharacter(damageTable.entityInstance)
+                    
+                    if attacker == lplr and victim and victim ~= lplr then
+                        lastHitTime = workspace:GetServerTimeNow()
+                        enableEmpower()
+                    end
+                end))
+                
+                Nazar:Clean(vapeEvents.EntityDeathEvent.Event:Connect(function(deathTable)
+                    if not entitylib.isAlive or not AutoEmpower.Enabled then return end
+                    
+                    local killer = playersService:GetPlayerFromCharacter(deathTable.fromEntity)
+                    local killed = playersService:GetPlayerFromCharacter(deathTable.entityInstance)
+                    
+                    if killer == lplr and killed and killed ~= lplr then
+                        disableEmpower()
+                    end
+                end))
+                
+                task.spawn(function()
+                    repeat
+                        if entitylib.isAlive then
+                            local currentTime = workspace:GetServerTimeNow()
+                            
+                            if AutoEmpower.Enabled and empoweredMode and (currentTime - lastHitTime) >= EmpowerTimeout.Value then
+                                disableEmpower()
+                            end
+                            
+                            if AutoConsume.Enabled then
+                                tryConsumeLifeForce()
+                            end
+                        else
+                            if empoweredMode then
+                                disableEmpower()
+                            end
+                        end
+                        
+                        task.wait(0.1)
+                    until not Nazar.Enabled
+                end)
+            else
+                if empoweredMode then
+                    disableEmpower()
+                end
+                empoweredMode = false
+                lastHitTime = 0
+                lastConsumeTime = 0
+            end
+        end,
+        Tooltip = 'Automatically manages Nazar abilities'
+    })
+    
+    AutoEmpower = Nazar:CreateToggle({
+        Name = 'Auto Empower',
+        Default = true,
+        Tooltip = 'Auto enable/disable empowered attacks on hit/kill',
+        Function = function(callback)
+            if EmpowerTimeout and EmpowerTimeout.Object then 
+                EmpowerTimeout.Object.Visible = callback 
+            end
+        end
+    })
+    
+    EmpowerTimeout = Nazar:CreateSlider({
+        Name = 'Empower Timeout',
+        Min = 1,
+        Max = 10,
+        Default = 3,
+        Suffix = 's',
+        Tooltip = 'Disable empower after this many seconds without hitting',
+        Visible = false
+    })
+    
+    AutoConsume = Nazar:CreateToggle({
+        Name = 'Auto Consume',
+        Default = true,
+        Tooltip = 'Auto consume life force to heal when low HP',
+        Function = function(callback)
+            if HealThreshold and HealThreshold.Object then 
+                HealThreshold.Object.Visible = callback 
+            end
+            if MinLifeForce and MinLifeForce.Object then 
+                MinLifeForce.Object.Visible = callback 
+            end
+            if ConsumeDelay and ConsumeDelay.Object then 
+                ConsumeDelay.Object.Visible = callback 
+            end
+        end
+    })
+    
+    HealThreshold = Nazar:CreateSlider({
+        Name = 'Heal Threshold',
+        Min = 10,
+        Max = 100,
+        Default = 55,
+        Suffix = '%',
+        Tooltip = 'Consume life force when HP is below this %',
+        Visible = false
+    })
+    
+    MinLifeForce = Nazar:CreateSlider({
+        Name = 'Min Life Force',
+        Min = 1,
+        Max = 100,
+        Default = 25,
+        Tooltip = 'Minimum life force required to heal',
+        Visible = false
+    })
+    
+    ConsumeDelay = Nazar:CreateSlider({
+        Name = 'Consume Cooldown',
+        Min = 0,
+        Max = 10,
+        Default = 3,
+        Suffix = 's',
+        Tooltip = 'Cooldown between consuming life force',
+        Visible = false
+    })
+end)
+
+run(function()
+    local ServerSync
+    local NetworkClient = cloneref(game:GetService("NetworkClient"))
+    local NetworkSettings = settings():GetService("NetworkSettings")
+    local Stats = cloneref(game:GetService("Stats"))
+    local defaultLag = NetworkSettings.IncomingReplicationLag
+    local connection
+    local function getPing()
+        local pingStat = Stats.Network.ServerStatsItem["Data Ping"]
+        if pingStat then
+            return pingStat:GetValue()
+        end
+        return 50
+    end
+    local function getFPS()
+        return math.floor(1 / runService.RenderStepped:Wait())
+    end
+    ServerSync = vape.Categories.Legit:CreateModule({
+        Name = "ServerSync",
+        Function = function(callback)
+            if callback then
+                connection = task.spawn(function()
+                    while ServerSync.Enabled do
+                        local ping = getPing()
+                        local fps = getFPS()
+                        local kbps = math.clamp((fps * 35) - (ping * 4),512,20000)
+                        local lag = math.clamp(ping / 1000,0,0.25)
+                        pcall(function()
+                            NetworkClient:SetOutgoingKBPSLimit(kbps)
+                            NetworkSettings.IncomingReplicationLag = lag
+                        end)
+                        task.wait(0.25)
+                    end
+                end)
+            else
+                if connection then
+                    task.cancel(connection)
+                    connection = nil
+                end
+                pcall(function()
+                    NetworkClient:SetOutgoingKBPSLimit(math.huge)
+                    NetworkSettings.IncomingReplicationLag = defaultLag
+                end)
+            end
+        end,
+		Tooltip = "Synchronizes network limits with your ping and FPS"
+    })
+end)
+
+run(function()
+    local Lucia
+    local AutoDepositToggle
+    local RangeSlider
+    local DelayToggle
+    local DelaySlider
+    local LuciaESPToggle
+    local CandyESPToggle
+    local IgnoreTeammatesESP
+    local ESPBackground
+    local ESPColor = {}
+    local LuciaSpyToggle
+    local IgnoreTeammatesSpy
+    local DisplayNameToggle
+    
+    local CollectionService = game:GetService("CollectionService")
+    local RunService = game:GetService("RunService")
+    local Players = game:GetService("Players")
+    local lplr = Players.LocalPlayer
+    
+    local Folder = Instance.new('Folder')
+    Folder.Parent = vape.gui
+    local Reference = {}
+    local collectedPinatas = {}
+    local trackedPinatas = {}
+
+    local function collectPinata(v)
+        if collectedPinatas[v] then return end
+        collectedPinatas[v] = true
+        
+        pcall(function()
+            if getItem('candy') then
+                bedwars.Client:Get(remotes.DepositPinata):CallServer(v)
+            end
+        end)
+        
+        if DelayToggle.Enabled then
+            task.wait(DelaySlider.Value)
+        end
+        
+        task.delay(2, function() 
+            collectedPinatas[v] = nil 
+        end)
+    end
+
+    local function isTeammateESP(pinataPart)
+        if not IgnoreTeammatesESP.Enabled then return false end
+        
+        local placerId = pinataPart:GetAttribute("PlacedByUserId") or pinataPart:GetAttribute("PlacerId")
+        if not placerId then
+            local parent = pinataPart.Parent
+            if parent then
+                placerId = parent:GetAttribute("PlacedByUserId") or parent:GetAttribute("PlacerId")
+            end
+        end
+        
+        if placerId then
+            if placerId == lplr.UserId then
+                return true
+            end
+            
+            local placer = Players:GetPlayerByUserId(placerId)
+            if placer and placer.Team == lplr.Team then
+                return true
+            end
+        end
+        
+        return false
+    end
+    
+    local function isTeammateSpy(pinataPart)
+        if not IgnoreTeammatesSpy.Enabled then return false end
+        
+        local placerId = pinataPart:GetAttribute("PlacedByUserId") or pinataPart:GetAttribute("PlacerId")
+        if not placerId then
+            local parent = pinataPart.Parent
+            if parent then
+                placerId = parent:GetAttribute("PlacedByUserId") or parent:GetAttribute("PlacerId")
+            end
+        end
+        
+        if placerId then
+            if placerId == lplr.UserId then
+                return true
+            end
+            
+            local placer = Players:GetPlayerByUserId(placerId)
+            if placer and placer.Team == lplr.Team then
+                return true
+            end
+        end
+        
+        return false
+    end
+
+    local function getCandyAmount(pinataPart)
+        local coins = pinataPart:GetAttribute("Coin")
+        return coins or 0
+    end
+
+    local function getProperIcon(iconType)
+        local icon = bedwars.getIcon({itemType = iconType}, true)
+        if not icon or icon == "" then
+            return nil
+        end
+        return icon
+    end
+
+    local function Added(pinataPart)
+        if isTeammateESP(pinataPart) then
+            return
+        end
+        
+        if Reference[pinataPart] then return end
+        
+        local billboard = Instance.new('BillboardGui')
+        billboard.Parent = Folder
+        billboard.Name = 'pinata'
+        billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+        billboard.Size = UDim2.fromOffset(CandyESPToggle.Enabled and 80 or 36, 36)
+        billboard.AlwaysOnTop = true
+        billboard.ClipsDescendants = false
+        billboard.Adornee = pinataPart
+        
+        local blur = addBlur(billboard)
+        blur.Visible = ESPBackground.Enabled
+        
+        local frame = Instance.new('Frame')
+        frame.Size = UDim2.fromScale(1, 1)
+        frame.BackgroundColor3 = Color3.fromHSV(ESPColor.Hue, ESPColor.Sat, ESPColor.Value)
+        frame.BackgroundTransparency = 1 - (ESPBackground.Enabled and ESPColor.Opacity or 0)
+        frame.BorderSizePixel = 0
+        frame.Parent = billboard
+        
+        local uicorner = Instance.new('UICorner')
+        uicorner.CornerRadius = UDim.new(0, 4)
+        uicorner.Parent = frame
+        
+        local pinataIcon = getProperIcon('pinata')
+        if pinataIcon then
+            local image = Instance.new('ImageLabel')
+            image.Name = 'PinataIcon'
+            image.Size = UDim2.fromOffset(36, 36)
+            image.Position = UDim2.new(0, 0, 0.5, 0)
+            image.AnchorPoint = Vector2.new(0, 0.5)
+            image.BackgroundTransparency = 1
+            image.Image = pinataIcon
+            image.Parent = frame
+        end
+        
+        local candyAmount = nil
+        local candyIcon = nil
+        
+        if CandyESPToggle.Enabled then
+            candyAmount = Instance.new('TextLabel')
+            candyAmount.Name = 'CandyAmount'
+            candyAmount.Size = UDim2.fromOffset(25, 20)
+            candyAmount.Position = UDim2.new(0, 40, 0.5, 0)
+            candyAmount.AnchorPoint = Vector2.new(0, 0.5)
+            candyAmount.BackgroundTransparency = 1
+            candyAmount.Text = tostring(getCandyAmount(pinataPart))
+            candyAmount.TextColor3 = Color3.fromRGB(255, 255, 255)
+            candyAmount.TextSize = 16
+            candyAmount.Font = Enum.Font.GothamBold
+            candyAmount.TextStrokeTransparency = 0.5
+            candyAmount.TextStrokeColor3 = Color3.new(0, 0, 0)
+            candyAmount.Parent = frame
+            
+            local candyIconImage = getProperIcon('candy')
+            if candyIconImage then
+                candyIcon = Instance.new('ImageLabel')
+                candyIcon.Name = 'CandyIcon'
+                candyIcon.Size = UDim2.fromOffset(18, 18)
+                candyIcon.Position = UDim2.new(0, 65, 0.5, 0)
+                candyIcon.AnchorPoint = Vector2.new(0, 0.5)
+                candyIcon.BackgroundTransparency = 1
+                candyIcon.Image = candyIconImage
+                candyIcon.Parent = frame
+            end
+        end
+        
+        Reference[pinataPart] = {
+            billboard = billboard,
+            frame = frame,
+            candyAmount = candyAmount,
+            candyIcon = candyIcon
+        }
+    end
+
+    local function Removed(pinataPart)
+        if Reference[pinataPart] then
+            Reference[pinataPart].billboard:Destroy()
+            Reference[pinataPart] = nil
+        end
+    end
+
+    local function updateCandyDisplay(pinataPart)
+        local ref = Reference[pinataPart]
+        if not ref then return end
+        
+        if CandyESPToggle.Enabled then
+            if not ref.candyAmount then
+                ref.candyAmount = Instance.new('TextLabel')
+                ref.candyAmount.Name = 'CandyAmount'
+                ref.candyAmount.Size = UDim2.fromOffset(25, 20)
+                ref.candyAmount.Position = UDim2.new(0, 40, 0.5, 0)
+                ref.candyAmount.AnchorPoint = Vector2.new(0, 0.5)
+                ref.candyAmount.BackgroundTransparency = 1
+                ref.candyAmount.TextColor3 = Color3.fromRGB(255, 255, 255)
+                ref.candyAmount.TextSize = 16
+                ref.candyAmount.Font = Enum.Font.GothamBold
+                ref.candyAmount.TextStrokeTransparency = 0.5
+                ref.candyAmount.TextStrokeColor3 = Color3.new(0, 0, 0)
+                ref.candyAmount.Parent = ref.frame
+                
+                local candyIconImage = getProperIcon('candy')
+                if candyIconImage and not ref.candyIcon then
+                    ref.candyIcon = Instance.new('ImageLabel')
+                    ref.candyIcon.Name = 'CandyIcon'
+                    ref.candyIcon.Size = UDim2.fromOffset(18, 18)
+                    ref.candyIcon.Position = UDim2.new(0, 65, 0.5, 0)
+                    ref.candyIcon.AnchorPoint = Vector2.new(0, 0.5)
+                    ref.candyIcon.BackgroundTransparency = 1
+                    ref.candyIcon.Image = candyIconImage
+                    ref.candyIcon.Parent = ref.frame
+                end
+                
+                ref.billboard.Size = UDim2.fromOffset(80, 36)
+            end
+            
+            if ref.candyAmount then
+                ref.candyAmount.Text = tostring(getCandyAmount(pinataPart))
+            end
+        else
+            if ref.candyAmount then
+                ref.candyAmount:Destroy()
+                ref.candyAmount = nil
+            end
+            if ref.candyIcon then
+                ref.candyIcon:Destroy()
+                ref.candyIcon = nil
+            end
+            ref.billboard.Size = UDim2.fromOffset(36, 36)
+        end
+    end
+
+    local function findExistingPinatas()
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") and obj.Name == "pinata" then
+                if not Reference[obj] and not isTeammateESP(obj) then
+                    Added(obj)
+                end
+            end
+        end
+    end
+
+    local function refreshESP()
+        Folder:ClearAllChildren()
+        table.clear(Reference)
+        findExistingPinatas()
+    end
+
+    local function getPlayerName(player)
+        if DisplayNameToggle.Enabled then
+            return player.DisplayName ~= "" and player.DisplayName or player.Name
+        else
+            return player.Name
+        end
+    end
+
+    local function getTeamName(player)
+        if player.Team then
+            return player.Team.Name
+        end
+        return "Unknown"
+    end
+
+	local function setupLuciaSpy()
+		local util = require(game:GetService("ReplicatedStorage").TS.games.bedwars.kit.kits['piggy-bank']['piggy-bank-util']).PiggyBankUtil
+		
+		for _, obj in pairs(workspace:GetDescendants()) do
+			if obj:IsA("BasePart") and obj.Name == "pinata" then
+				if not isTeammateSpy(obj) then
+					local placerId = obj:GetAttribute("PlacedByUserId") or obj:GetAttribute("PlacerId")
+					
+					if placerId then
+						local placer = Players:GetPlayerByUserId(placerId)
+						local initialCandy = getCandyAmount(obj)
+						
+						trackedPinatas[obj] = {
+							player = placer,
+							lastCandy = initialCandy,
+							exists = true,
+							placedTime = tick()
+						}
+					end
+				end
+			end
+		end
+		
+		Lucia:Clean(workspace.DescendantAdded:Connect(function(obj)
+			if not LuciaSpyToggle.Enabled then return end
+			
+			if obj:IsA("BasePart") and obj.Name == "pinata" then
+				task.wait(0.2) 
+				
+				if not isTeammateSpy(obj) then
+					local placerId = obj:GetAttribute("PlacedByUserId") or obj:GetAttribute("PlacerId")
+					
+					if placerId then
+						local placer = Players:GetPlayerByUserId(placerId)
+						local initialCandy = getCandyAmount(obj)
+						
+						trackedPinatas[obj] = {
+							player = placer,
+							lastCandy = initialCandy,
+							exists = true,
+							placedTime = tick()
+						}
+					end
+				end
+			end
+		end))
+		
+		Lucia:Clean(bedwars.Client:Get("PiggyBankPop"):Connect(function(self)
+			if not LuciaSpyToggle.Enabled then return end
+			local plr = self.awardedPlayer
+			if not plr then return end
+			if IgnoreTeammatesSpy.Enabled then
+				if plr == lplr or (plr.Team and plr.Team == lplr.Team) then
+					return
+				end
+			end
+			
+			local rewards = util:getRewardsFromCoins(self.coins)
+			local I = rewards[1]
+			local D = rewards[2]
+			local E = rewards[3]
+			local irons = I and I.amount or 0
+			local diamond = D and D.amount or 0
+			local emeralds = E and E.amount or 0
+			
+			local playerName = getPlayerName(plr)
+			local teamName = getTeamName(plr)
+			local loot = irons.." irons, "..diamond.." diamonds, "..emeralds.." emeralds"
+			
+			vape:CreateNotification(
+				"Lucia Spy", 
+				string.format("%s (%s) opened their pinata and got %s", playerName, teamName, loot), 
+				8
+			)
+			
+			for pinataPart, data in pairs(trackedPinatas) do
+				if data.player and data.player.UserId == plr.UserId then
+					trackedPinatas[pinataPart] = nil
+				end
+			end
+		end))
+		
+		Lucia:Clean(RunService.Heartbeat:Connect(function()
+			if not LuciaSpyToggle.Enabled then return end
+			local toRemove = {}
+			for pinataPart, data in pairs(trackedPinatas) do
+				if pinataPart and pinataPart.Parent then
+					local currentCandy = getCandyAmount(pinataPart)
+				
+					if currentCandy ~= data.lastCandy then
+						local difference = currentCandy - data.lastCandy
+						
+						if difference > 0 and data.player then
+							local playerName = getPlayerName(data.player)
+							local teamName = getTeamName(data.player)
+							
+							vape:CreateNotification(
+								"Lucia Spy",
+								string.format("%s (%s) has just deposited %d candy and now has %d candy", 
+									playerName, teamName, difference, currentCandy),
+								5
+							)
+						end
+						
+						data.lastCandy = currentCandy
+					end
+				else
+					if data.exists and data.player then
+						local timeSincePlaced = tick() - (data.placedTime or tick())
+						
+						if timeSincePlaced > 2 then 
+							local playerName = getPlayerName(data.player)
+							local teamName = getTeamName(data.player)
+							
+							vape:CreateNotification(
+								"Lucia Spy",
+								string.format("%s (%s) has just broken their pinata with %d candy", 
+									playerName, teamName, data.lastCandy),
+								5
+							)
+						end
+					end
+					
+					table.insert(toRemove, pinataPart)
+				end
+			end
+			
+			for _, pinataPart in ipairs(toRemove) do
+				trackedPinatas[pinataPart] = nil
+			end
+		end))
+	end
+
+    Lucia = vape.Categories.Kits:CreateModule({
+        Name = 'Lucia',
+        Function = function(callback)
+            if callback then
+                if LuciaESPToggle.Enabled then
+                    findExistingPinatas()
+                    
+                    Lucia:Clean(workspace.DescendantAdded:Connect(function(obj)
+                        if Lucia.Enabled and obj:IsA("BasePart") and obj.Name == "pinata" then
+                            task.wait(0.1)
+                            if not isTeammateESP(obj) then
+                                Added(obj)
+                            end
+                        end
+                    end))
+                    
+                    Lucia:Clean(workspace.DescendantRemoving:Connect(function(obj)
+                        if obj:IsA("BasePart") and obj.Name == "pinata" and Reference[obj] then
+                            Removed(obj)
+                        end
+                    end))
+                end
+                
+                if LuciaESPToggle.Enabled then
+                    Lucia:Clean(RunService.Heartbeat:Connect(function()
+                        if not Lucia.Enabled or not LuciaESPToggle.Enabled then return end
+                        
+                        for pinataPart, ref in pairs(Reference) do
+                            if pinataPart and pinataPart.Parent then
+                                updateCandyDisplay(pinataPart)
+                            else
+                                if ref.billboard then
+                                    ref.billboard:Destroy()
+                                end
+                                Reference[pinataPart] = nil
+                            end
+                        end
+                    end))
+                end
+                
+                if AutoDepositToggle.Enabled then
+                    task.spawn(function()
+                        repeat
+                            if entitylib.isAlive then
+                                for _, obj in pairs(workspace:GetDescendants()) do
+                                    if obj:IsA("BasePart") and obj.Name == "pinata" then
+                                        if (entitylib.character.RootPart.Position - obj.Position).Magnitude <= RangeSlider.Value then
+                                            collectPinata(obj)
+                                        end
+                                    end
+                                end
+                            end
+                            task.wait(DelayToggle.Enabled and DelaySlider.Value or 0)
+                        until not Lucia.Enabled
+                    end)
+                end
+                
+                if LuciaSpyToggle.Enabled then
+                    setupLuciaSpy()
+                end
+            else
+                Folder:ClearAllChildren()
+                table.clear(Reference)
+                table.clear(collectedPinatas)
+                table.clear(trackedPinatas)
+            end
+        end,
+        Tooltip = 'Lucia (Pinata) Kit Module'
+    })
+
+    AutoDepositToggle = Lucia:CreateToggle({
+        Name = 'Auto Deposit',
+        Default = false,
+        Function = function(callback)
+            if RangeSlider and RangeSlider.Object then
+                RangeSlider.Object.Visible = callback
+            end
+            if DelayToggle and DelayToggle.Object then
+                DelayToggle.Object.Visible = callback
+            end
+        end
+    })
+
+    RangeSlider = Lucia:CreateSlider({
+        Name = 'Range',
+        Min = 1,
+        Max = 30,
+        Default = 12,
+        Suffix = ' studs',
+        Visible = false
+    })
+
+    DelayToggle = Lucia:CreateToggle({
+        Name = 'Delay',
+        Default = false,
+        Visible = false,
+        Function = function(callback)
+            if DelaySlider and DelaySlider.Object then
+                DelaySlider.Object.Visible = callback
+            end
+        end
+    })
+
+    DelaySlider = Lucia:CreateSlider({
+        Name = 'Delay Amount',
+        Min = 0,
+        Max = 2,
+        Default = 0.5,
+        Decimal = 10,
+        Suffix = 's',
+        Visible = false
+    })
+
+    LuciaESPToggle = Lucia:CreateToggle({
+        Name = 'Pinata ESP',
+        Default = false,
+        Tooltip = 'Shows pinata locations',
+        Function = function(callback)
+            if CandyESPToggle and CandyESPToggle.Object then
+                CandyESPToggle.Object.Visible = callback
+            end
+            if IgnoreTeammatesESP and IgnoreTeammatesESP.Object then
+                IgnoreTeammatesESP.Object.Visible = callback
+            end
+            if ESPBackground and ESPBackground.Object then
+                ESPBackground.Object.Visible = callback
+            end
+            if ESPColor and ESPColor.Object then
+                ESPColor.Object.Visible = callback
+            end
+            
+            if Lucia.Enabled then
+                if callback then
+                    findExistingPinatas()
+                else
+                    Folder:ClearAllChildren()
+                    table.clear(Reference)
+                end
+            end
+        end
+    })
+
+    CandyESPToggle = Lucia:CreateToggle({
+        Name = 'Candy ESP',
+        Default = false,
+        Visible = false,
+        Tooltip = 'Shows candy amount in pinatas',
+        Function = function(callback)
+            for pinataPart in pairs(Reference) do
+                updateCandyDisplay(pinataPart)
+            end
+        end
+    })
+
+    IgnoreTeammatesESP = Lucia:CreateToggle({
+        Name = 'Ignore Teammates',
+        Default = true,
+        Visible = false,
+        Tooltip = 'Hide ESP for teammates',
+        Function = function(callback)
+            if Lucia.Enabled and LuciaESPToggle.Enabled then
+                refreshESP()
+            end
+        end
+    })
+
+    ESPBackground = Lucia:CreateToggle({
+        Name = 'Background',
+        Default = true,
+        Visible = false,
+        Function = function(callback)
+            if ESPColor and ESPColor.Object then
+                ESPColor.Object.Visible = callback
+            end
+            for _, ref in pairs(Reference) do
+                if ref.frame then
+                    ref.frame.BackgroundTransparency = 1 - (callback and ESPColor.Opacity or 0)
+                    if ref.billboard.Blur then
+                        ref.billboard.Blur.Visible = callback
+                    end
+                end
+            end
+        end
+    })
+
+    ESPColor = Lucia:CreateColorSlider({
+        Name = 'Background Color',
+        DefaultValue = 0,
+        DefaultOpacity = 0.5,
+        Visible = false,
+        Function = function(hue, sat, val, opacity)
+            ESPColor.Hue = hue
+            ESPColor.Sat = sat
+            ESPColor.Value = val
+            ESPColor.Opacity = opacity
+            
+            for _, ref in pairs(Reference) do
+                if ref.frame then
+                    ref.frame.BackgroundColor3 = Color3.fromHSV(hue, sat, val)
+                    ref.frame.BackgroundTransparency = 1 - opacity
+                end
+            end
+        end,
+        Darker = true
+    })
+
+    LuciaSpyToggle = Lucia:CreateToggle({
+        Name = 'Lucia Spy',
+        Default = false,
+        Tooltip = 'Notifies when players deposit, break, or open pinatas',
+        Function = function(callback)
+            if IgnoreTeammatesSpy and IgnoreTeammatesSpy.Object then
+                IgnoreTeammatesSpy.Object.Visible = callback
+            end
+            if DisplayNameToggle and DisplayNameToggle.Object then
+                DisplayNameToggle.Object.Visible = callback
+            end
+            
+            if Lucia.Enabled and callback then
+                setupLuciaSpy()
+            else
+                table.clear(trackedPinatas)
+            end
+        end
+    })
+
+    IgnoreTeammatesSpy = Lucia:CreateToggle({
+        Name = 'Ignore Teammates',
+        Default = true,
+        Visible = false
+    })
+
+    DisplayNameToggle = Lucia:CreateToggle({
+        Name = 'Display Name',
+        Default = false,
+        Visible = false,
+        Tooltip = 'Show display names instead of usernames'
+    })
+end)
+
+run(function()
+    local GodMode = {Enabled = false}
+    local Range = 16
+    local LowHPOnly = false
+    local HPThreshold = 50
+    local Delay = 1
+    
+    local lastDodgeTime = 0
+
+    GodMode = vape.Categories.Blatant:CreateModule({
+        Name = "GodMode",
+        Function = function(call) 
+            if call then
+                task.spawn(function()
+                    while GodMode.Enabled do
+                        local root = lplr.Character and lplr.Character:FindFirstChild("HumanoidRootPart")
+                        local humanoid = lplr.Character and lplr.Character:FindFirstChild("Humanoid")
+                        
+                        if root and humanoid then
+                            local shouldDodge = true
+                            if LowHPOnly.Enabled then
+                                shouldDodge = humanoid.Health <= HPThreshold.Value
+                            end
+                            
+                            local currentTime = tick()
+                            if shouldDodge and (currentTime - lastDodgeTime) >= Delay.Value then
+                                local orgPos = root.Position
+                                local foundEnemy = false
+
+                                for _, v in next, playersService:GetPlayers() do
+                                    if v ~= lplr and v.Team ~= lplr.Team then
+                                        local enemyChar = v.Character
+                                        local enemyRoot = enemyChar and enemyChar:FindFirstChild("HumanoidRootPart")
+                                        local enemyHum = enemyChar and enemyChar:FindFirstChild("Humanoid")
+                                        if enemyRoot and enemyHum and enemyHum.Health > 0 then
+                                            local dist = (root.Position - enemyRoot.Position).Magnitude
+                                            if dist <= Range.Value then
+                                                foundEnemy = true
+                                                break
+                                            end
+                                        end
+                                    end
+                                end
+
+                                if foundEnemy then
+                                    root.CFrame = CFrame.new(orgPos + Vector3.new(0, -230, 0))
+                                    task.wait(0.2)
+                                    if GodMode.Enabled and lplr.Character and lplr.Character:FindFirstChild("HumanoidRootPart") then
+                                        lplr.Character.HumanoidRootPart.CFrame = CFrame.new(orgPos)
+                                    end
+                                    lastDodgeTime = tick()
+                                end
+                            end
+                        end
+                        task.wait(0.2)
+                    end
+                end)
+            end
+        end,
+        Tooltip = "Prevents you from dying"
+    })
+
+    Range = GodMode:CreateSlider({
+        Name = "Range",
+        Min = 0,
+        Max = 50,
+        Default = 15,
+        Function = function(val) Range.Value = val end
+    })
+    
+    LowHPOnly = GodMode:CreateToggle({
+        Name = "Low HP Only",
+        Default = false,
+        Function = function(val) 
+            LowHPOnly.Enabled = val 
+            HPThreshold.Object.Visible = val
+        end
+    })
+    
+    HPThreshold = GodMode:CreateSlider({
+        Name = "HP Threshold",
+        Min = 10,
+        Max = 100,
+        Default = 50,
+        Function = function(val) HPThreshold.Value = val end
+    })
+    HPThreshold.Object.Visible = false
+    
+    Delay = GodMode:CreateSlider({
+        Name = "Delay",
+        Min = 0,
+        Max = 10,
+        Default = 1,
+        Decimal = 10,
+        Suffix = "s",
+        Function = function(val) Delay.Value = val end
+    })
+end)
+
+run(function()
+    local DrillUtilities
+    local DrillESP
+    local TeamCheck
+    local Background
+    local Color = {}
+    local Reference = {}
+    local Folder = Instance.new('Folder')
+    Folder.Parent = vape.gui
+    local AutoAttack
+    local AttackRange
+    local attackRunning = false
+    local lastAttackTime = 0
+    local espConnections = {}
+    
+    local Players = game:GetService("Players")
+    local lplr = Players.LocalPlayer
+    local RunService = game:GetService("RunService")
+    local Workspace = game:GetService("Workspace")
+    
+    local function isMyDrill(drill)
+        if not drill then return false end
+        local placerId = drill:GetAttribute("PlacedByUserId")
+        return placerId and placerId == lplr.UserId
+    end
+    
+    local function isTeammate(drill)
+        if not TeamCheck.Enabled then return false end
+        local placerId = drill:GetAttribute("PlacedByUserId")
+        if placerId then
+            local placer = Players:GetPlayerByUserId(placerId)
+            if placer and placer.Team == lplr.Team then
+                return true
+            end
+        end
+        return false
+    end
+    
+    local function getDrillInfo(drill)
+        local itemType = drill:GetAttribute("ItemType")
+        local health = drill:GetAttribute("Health") or 0
+        local maxHealth = drill:GetAttribute("MaxHealth") or 750
+        local amount = 0
+        if itemType then
+            amount = drill:GetAttribute(itemType) or 0
+        end
+        return itemType, amount, health, maxHealth
+    end
+    
+    local function getProperIcon(iconType)
+        if not iconType then return nil end
+        if not bedwars or not bedwars.getIcon then
+            return "rbxasset://textures/ui/GuiImagePlaceholder.png"
+        end
+        local success, icon = pcall(function()
+            return bedwars.getIcon({itemType = iconType}, true)
+        end)
+        if not success or not icon or icon == "" then
+            return "rbxasset://textures/ui/GuiImagePlaceholder.png"
+        end
+        return icon
+    end
+    
+    local function createESP(drill)
+        if isTeammate(drill) then return end
+        if Reference[drill] then return end
+        local head = drill:FindFirstChild("Head")
+        if not head then return end
+        
+        local billboard = Instance.new('BillboardGui')
+        billboard.Parent = Folder
+        billboard.Name = 'drill-esp'
+        billboard.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+        billboard.Size = UDim2.fromOffset(110, 26)
+        billboard.AlwaysOnTop = true
+        billboard.ClipsDescendants = false
+        billboard.Adornee = head
+        
+        local blur = addBlur(billboard)
+        blur.Visible = Background.Enabled
+        
+        local frame = Instance.new('Frame')
+        frame.Size = UDim2.fromScale(1, 1)
+        frame.BackgroundColor3 = Color3.fromHSV(Color.Hue, Color.Sat, Color.Value)
+        frame.BackgroundTransparency = 1 - (Background.Enabled and Color.Opacity or 0.3)
+        frame.BorderSizePixel = 0
+        frame.Parent = billboard
+        
+        local uicorner = Instance.new('UICorner')
+        uicorner.CornerRadius = UDim.new(0, 6)
+        uicorner.Parent = frame
+        
+        local drillIcon = getProperIcon('drill')
+        if drillIcon then
+            local drillImage = Instance.new('ImageLabel')
+            drillImage.Name = 'DrillIcon'
+            drillImage.Size = UDim2.fromOffset(18, 18)
+            drillImage.Position = UDim2.new(0, 4, 0.5, 0)
+            drillImage.AnchorPoint = Vector2.new(0, 0.5)
+            drillImage.BackgroundTransparency = 1
+            drillImage.Image = drillIcon
+            drillImage.Parent = frame
+        end
+        
+        local healthLabel = Instance.new('TextLabel')
+        healthLabel.Name = 'Health'
+        healthLabel.Size = UDim2.new(0, 32, 1, 0)
+        healthLabel.Position = UDim2.new(0, 25, 0, 0)
+        healthLabel.BackgroundTransparency = 1
+        healthLabel.Text = "750"
+        healthLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        healthLabel.TextSize = 12
+        healthLabel.Font = Enum.Font.GothamBold
+        healthLabel.TextStrokeTransparency = 0.5
+        healthLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+        healthLabel.TextXAlignment = Enum.TextXAlignment.Left
+        healthLabel.Parent = frame
+        
+        local resourceImage = Instance.new('ImageLabel')
+        resourceImage.Name = 'ResourceIcon'
+        resourceImage.Size = UDim2.fromOffset(16, 16)
+        resourceImage.Position = UDim2.new(0, 62, 0.5, 0)
+        resourceImage.AnchorPoint = Vector2.new(0, 0.5)
+        resourceImage.BackgroundTransparency = 1
+        resourceImage.Image = ""
+        resourceImage.Parent = frame
+        
+        local amountLabel = Instance.new('TextLabel')
+        amountLabel.Name = 'Amount'
+        amountLabel.Size = UDim2.new(0, 28, 1, 0)
+        amountLabel.Position = UDim2.new(1, -30, 0, 0)
+        amountLabel.BackgroundTransparency = 1
+        amountLabel.Text = "0"
+        amountLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        amountLabel.TextSize = 12
+        amountLabel.Font = Enum.Font.GothamBold
+        amountLabel.TextStrokeTransparency = 0.5
+        amountLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+        amountLabel.TextXAlignment = Enum.TextXAlignment.Left
+        amountLabel.Parent = frame
+        
+        Reference[drill] = {
+            billboard = billboard,
+            frame = frame,
+            healthLabel = healthLabel,
+            resourceImage = resourceImage,
+            amountLabel = amountLabel
+        }
+    end
+    
+    local function updateESP(drill)
+        local ref = Reference[drill]
+        if not ref then return end
+        local itemType, amount, health, maxHealth = getDrillInfo(drill)
+        
+        if ref.healthLabel then
+            ref.healthLabel.Text = tostring(math.floor(health))
+            local healthPercent = health / maxHealth
+            if healthPercent > 0.6 then
+                ref.healthLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+            elseif healthPercent > 0.3 then
+                ref.healthLabel.TextColor3 = Color3.fromRGB(255, 165, 0)
+            else
+                ref.healthLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+            end
+        end
+        
+        if itemType then
+            if ref.resourceImage then
+                local resourceIcon = getProperIcon(itemType)
+                if resourceIcon then
+                    ref.resourceImage.Image = resourceIcon
+                end
+            end
+            if ref.amountLabel then
+                ref.amountLabel.Text = tostring(math.floor(amount))
+            end
+        else
+            if ref.resourceImage then
+                ref.resourceImage.Image = ""
+            end
+            if ref.amountLabel then
+                ref.amountLabel.Text = "0"
+            end
+        end
+    end
+    
+    local function findAllDrills()
+        local drillGroup = Workspace:FindFirstChild("Drill")
+        if drillGroup and drillGroup:IsA("Model") then
+            if not isTeammate(drillGroup) then
+                createESP(drillGroup)
+            end
+        end
+        
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("Model") and obj.Name == "Drill" and obj ~= drillGroup then
+                if not isTeammate(obj) then
+                    createESP(obj)
+                end
+            end
+        end
+    end
+    
+    local function refreshESP()
+        Folder:ClearAllChildren()
+        table.clear(Reference)
+        if DrillESP.Enabled then
+            findAllDrills()
+        end
+    end
+    
+    local function setupESPConnections()
+        for _, conn in pairs(espConnections) do
+            if conn and conn.Disconnect then
+                conn:Disconnect()
+            end
+        end
+        table.clear(espConnections)
+        
+        table.insert(espConnections, Workspace.DescendantAdded:Connect(function(obj)
+            if not DrillESP.Enabled then return end
+            if obj:IsA("Model") and obj.Name == "Drill" then
+                task.wait(0.1)
+                if not isTeammate(obj) then
+                    createESP(obj)
+                end
+            end
+        end))
+        
+        table.insert(espConnections, Workspace.DescendantRemoving:Connect(function(obj)
+            if obj:IsA("Model") and obj.Name == "Drill" and Reference[obj] then
+                if Reference[obj].billboard then
+                    Reference[obj].billboard:Destroy()
+                end
+                Reference[obj] = nil
+            end
+        end))
+        
+        table.insert(espConnections, RunService.Heartbeat:Connect(function()
+            if not DrillESP.Enabled then return end
+            for drill, ref in pairs(Reference) do
+                if drill and drill.Parent then
+                    updateESP(drill)
+                else
+                    if ref.billboard then
+                        ref.billboard:Destroy()
+                    end
+                    Reference[drill] = nil
+                end
+            end
+        end))
+    end
+    
+    local function disconnectESP()
+        for _, conn in pairs(espConnections) do
+            if conn and conn.Disconnect then
+                conn:Disconnect()
+            end
+        end
+        table.clear(espConnections)
+    end
+    
+    local function getAttackData()
+        if not entitylib.isAlive then return false end
+        local hand = store.hand
+        if not hand or not hand.tool then return false end
+        if hand.tool.Name ~= "drill_controller" and hand.itemType ~= "drill_controller" then
+            return false
+        end
+        return true
+    end
+    
+    local function getEnemiesNearDrill(drill)
+        local enemies = {}
+        local head = drill:FindFirstChild("Head")
+        if not head then return enemies end
+        
+        for _, player in Players:GetPlayers() do
+            if player ~= lplr and player.Team ~= lplr.Team then
+                local char = player.Character
+                if char then
+                    local humanoid = char:FindFirstChild("Humanoid")
+                    local rootPart = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("RootPart")
+                    if humanoid and humanoid.Health > 0 and rootPart then
+                        local distance = (head.Position - rootPart.Position).Magnitude
+                        if distance <= AttackRange.Value then
+                            table.insert(enemies, {
+                                player = player,
+                                character = char,
+                                position = rootPart.Position,
+                                distance = distance
+                            })
+                        end
+                    end
+                end
+            end
+        end
+        return enemies
+    end
+    
+    local function startAutoAttack()
+        attackRunning = true
+        task.spawn(function()
+            while attackRunning and DrillUtilities.Enabled and AutoAttack.Enabled do
+                if not entitylib.isAlive then
+                    task.wait(0.1)
+                    continue
+                end
+                
+                local canAttack = getAttackData()
+                if not canAttack then
+                    task.wait(0.1)
+                    continue
+                end
+                
+                if (tick() - lastAttackTime) < 0.3 then
+                    task.wait(0.05)
+                    continue
+                end
+                
+                local attacked = false
+                local drill = Workspace:FindFirstChild("Drill")
+                if drill and drill:IsA("Model") and isMyDrill(drill) then
+                    local enemies = getEnemiesNearDrill(drill)
+                    if #enemies > 0 then
+                        table.sort(enemies, function(a, b)
+                            return a.distance < b.distance
+                        end)
+                        local target = enemies[1]
+                        pcall(function()
+                            game:GetService("ReplicatedStorage"):WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("net"):WaitForChild("out"):WaitForChild("_NetManaged"):WaitForChild("DrillAttack"):FireServer({
+                                targetPosition = target.position
+                            })
+                        end)
+                        lastAttackTime = tick()
+                        attacked = true
+                    end
+                end
+                
+                for _, obj in pairs(Workspace:GetDescendants()) do
+                    if attacked then break end
+                    if obj:IsA("Model") and obj.Name == "Drill" and isMyDrill(obj) then
+                        local enemies = getEnemiesNearDrill(obj)
+                        if #enemies > 0 then
+                            table.sort(enemies, function(a, b)
+                                return a.distance < b.distance
+                            end)
+                            local target = enemies[1]
+                            pcall(function()
+                                game:GetService("ReplicatedStorage"):WaitForChild("rbxts_include"):WaitForChild("node_modules"):WaitForChild("@rbxts"):WaitForChild("net"):WaitForChild("out"):WaitForChild("_NetManaged"):WaitForChild("DrillAttack"):FireServer({
+                                    targetPosition = target.position
+                                })
+                            end)
+                            lastAttackTime = tick()
+                            attacked = true
+                            break
+                        end
+                    end
+                end
+                
+                if not attacked then
+                    task.wait(0.1)
+                else
+                    task.wait(0.3)
+                end
+            end
+            attackRunning = false
+        end)
+    end
+    
+    DrillUtilities = vape.Categories.Kits:CreateModule({
+        Name = 'Drill Kit',
+        Function = function(callback)
+            if callback then
+                if AutoAttack.Enabled then
+                    startAutoAttack()
+                end
+            else
+                attackRunning = false
+                disconnectESP()
+                Folder:ClearAllChildren()
+                table.clear(Reference)
+            end
+        end,
+        Tooltip = 'Drill utilities: ESP and auto attack'
+    })
+    
+    DrillESP = DrillUtilities:CreateToggle({
+        Name = 'Drill ESP',
+        Default = false,
+        Tooltip = 'ESP for drills showing health and resources',
+        Function = function(callback)
+            if TeamCheck.Object then TeamCheck.Object.Visible = callback end
+            if Background.Object then Background.Object.Visible = callback end
+            if Color.Object then Color.Object.Visible = callback end
+            if callback then
+                setupESPConnections()
+                findAllDrills()
+            else
+                disconnectESP()
+                Folder:ClearAllChildren()
+                table.clear(Reference)
+            end
+        end
+    })
+    
+    TeamCheck = DrillUtilities:CreateToggle({
+        Name = 'Team Check',
+        Default = true,
+        Tooltip = 'Hide teammate drills',
+        Function = function(callback)
+            if DrillESP.Enabled then
+                refreshESP()
+            end
+        end
+    })
+    TeamCheck.Object.Visible = false
+    
+    Background = DrillUtilities:CreateToggle({
+        Name = 'Background',
+        Default = true,
+        Function = function(callback)
+            if Color.Object then Color.Object.Visible = callback end
+            for _, ref in pairs(Reference) do
+                if ref.frame then
+                    ref.frame.BackgroundTransparency = 1 - (callback and Color.Opacity or 0.3)
+                    if ref.billboard and ref.billboard.Blur then
+                        ref.billboard.Blur.Visible = callback
+                    end
+                end
+            end
+        end
+    })
+    Background.Object.Visible = false
+    
+    Color = DrillUtilities:CreateColorSlider({
+        Name = 'Background Color',
+        DefaultValue = 0,
+        DefaultOpacity = 0.3,
+        Function = function(hue, sat, val, opacity)
+            Color.Hue = hue
+            Color.Sat = sat
+            Color.Value = val
+            Color.Opacity = opacity
+            for _, ref in pairs(Reference) do
+                if ref.frame then
+                    ref.frame.BackgroundColor3 = Color3.fromHSV(hue, sat, val)
+                    ref.frame.BackgroundTransparency = 1 - opacity
+                end
+            end
+        end,
+        Darker = true
+    })
+    Color.Object.Visible = false
+    
+    AutoAttack = DrillUtilities:CreateToggle({
+        Name = 'Auto Attack',
+        Default = false,
+        Tooltip = 'Auto attack enemies near drills',
+        Function = function(callback)
+            if AttackRange.Object then AttackRange.Object.Visible = callback end
+            if callback and DrillUtilities.Enabled then
+                startAutoAttack()
+            else
+                attackRunning = false
+            end
+        end
+    })
+    
+    AttackRange = DrillUtilities:CreateSlider({
+        Name = 'Attack Range',
+        Min = 10,
+        Max = 20,
+        Default = 20,
+        Suffix = ' studs',
+        Tooltip = 'Range to attack from drill'
+    })
+    AttackRange.Object.Visible = false
+end)
