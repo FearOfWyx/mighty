@@ -6281,7 +6281,18 @@ run(function()
 	rayCheck.FilterType = Enum.RaycastFilterType.Include
 	rayCheck.FilterDescendantsInstances = {workspace:FindFirstChild('Map') or workspace}
 	local old
-	
+	local math_sqrt = math.sqrt
+	local math_abs = math.abs
+	local math_min = math.min
+	local math_max = math.max
+	local math_cos = math.cos
+	local math_acos = math.acos
+	local math_pow = math.pow
+	local math_pi = math.pi
+	local math_rad = math.rad
+	local cachedPots = {}
+	local lastPotScan = 0
+	local POT_SCAN_INTERVAL = 2
 	local armors = {
 		'none',
 		'leather_chestplate',
@@ -6298,33 +6309,64 @@ run(function()
 		return table.find(armors, chestplate.itemType) or 1
 	end
 
+	local function updatePotCache()
+		local currentTime = tick()
+		if currentTime - lastPotScan < POT_SCAN_INTERVAL then
+			return
+		end
+		
+		lastPotScan = currentTime
+		table.clear(cachedPots)
+		
+		local collectionService = game:GetService("CollectionService")
+		local pots = collectionService:GetTagged("desert_pot")
+		
+		if #pots == 0 then
+			for _, obj in pairs(workspace:GetDescendants()) do
+				if obj:IsA("BasePart") and obj.Name == "desert_pot" then
+					table.insert(cachedPots, obj)
+				end
+			end
+		else
+			cachedPots = pots
+		end
+	end
+
     local function getPotTarget(originPos)
+		updatePotCache()
+		
         local closestPot = nil
         local closestDistance = Range.Value
+		local rangeSquared = Range.Value * Range.Value
         
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and obj.Name == "desert_pot" then
-                local distance = (obj.Position - originPos).Magnitude
-                
-                if distance <= Range.Value and distance < closestDistance then
-                    local delta = (obj.Position - originPos)
-                    local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
-                    local angle = math.acos(localfacing:Dot((delta * Vector3.new(1, 0, 1)).Unit))
-                    
-                    if angle < (math.rad(FOV.Value) / 2) then
-                        if Targets.Walls.Enabled then
-                            local ray = workspace:Raycast(originPos, (obj.Position - originPos), rayCheck)
-                            if not ray then
-                                closestPot = obj
-                                closestDistance = distance
-                            end
-                        else
-                            closestPot = obj
-                            closestDistance = distance
-                        end
-                    end
-                end
-            end
+        for _, obj in pairs(cachedPots) do
+			if not obj or not obj.Parent then continue end
+			
+			local delta = obj.Position - originPos
+			local distanceSquared = delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z
+			
+			if distanceSquared > rangeSquared then continue end
+			
+			local distance = math_sqrt(distanceSquared)
+			if distance >= closestDistance then continue end
+			
+			local deltaFlat = Vector3.new(delta.X, 0, delta.Z)
+			local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
+			local dotProduct = localfacing:Dot(deltaFlat.Unit)
+			local fovThreshold = math_cos(math_rad(FOV.Value) / 2)
+			
+			if dotProduct >= fovThreshold then
+				if Targets.Walls.Enabled then
+					local ray = workspace:Raycast(originPos, delta, rayCheck)
+					if not ray then
+						closestPot = obj
+						closestDistance = distance
+					end
+				else
+					closestPot = obj
+					closestDistance = distance
+				end
+			end
         end
         
         return closestPot
@@ -6332,6 +6374,8 @@ run(function()
 	
 	local function getAeroPATarget(originPos)
 		local validTargets = {}
+		local rangeSquared = Range.Value * Range.Value
+		local fovThreshold = math_cos(math_rad(FOV.Value) / 2)
 		
 		for _, ent in entitylib.List do
 			if not Targets.Players.Enabled and ent.Player then continue end
@@ -6339,18 +6383,19 @@ run(function()
 			if not ent.Character or not ent.RootPart then continue end
 			if not ent[TargetPart.Value] then continue end
 			
-			local distance = (ent[TargetPart.Value].Position - originPos).Magnitude
-			if distance > Range.Value then continue end
+			local delta = ent[TargetPart.Value].Position - originPos
+			local distanceSquared = delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z
+			if distanceSquared > rangeSquared then continue end
+			
+			local deltaFlat = Vector3.new(delta.X, 0, delta.Z)
+			local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
+			local dotProduct = localfacing:Dot(deltaFlat.Unit)
+			if dotProduct < fovThreshold then continue end
 			
 			if Targets.Walls.Enabled then
-				local ray = workspace:Raycast(originPos, (ent[TargetPart.Value].Position - originPos), rayCheck)
+				local ray = workspace:Raycast(originPos, delta, rayCheck)
 				if ray then continue end
 			end
-			
-			local delta = (ent.RootPart.Position - originPos)
-			local localfacing = entitylib.character.RootPart.CFrame.LookVector * Vector3.new(1, 0, 1)
-			local angle = math.acos(localfacing:Dot((delta * Vector3.new(1, 0, 1)).Unit))
-			if angle >= (math.rad(FOV.Value) / 2) then continue end
 			
 			table.insert(validTargets, ent)
 		end
@@ -6526,7 +6571,7 @@ run(function()
 	end
 
     local function simpleAeroPAPrediction(origin, targetPos, targetVelocity, projectileSpeed, gravity, isJumping)
-        if not origin or not targetPos or not targetVelocity then
+        if not targetPos or not targetVelocity then
             return targetPos
         end
         
@@ -6534,27 +6579,28 @@ run(function()
             return targetPos
         end
         
-        if not gravity then
-            gravity = 196.2
-        end
+        gravity = gravity or 196.2
         
-        local distance = (targetPos - origin).Magnitude
+        local dx = targetPos.X - origin.X
+        local dy = targetPos.Y - origin.Y
+        local dz = targetPos.Z - origin.Z
+        local distance = math_sqrt(dx * dx + dy * dy + dz * dz)
         local travelTime = distance / projectileSpeed
         
-        if travelTime ~= travelTime or travelTime == math.huge then
-            travelTime = 0
-        end
+        travelTime = math_max(0, math_min(travelTime, 5))
         
-        local predictedPos = targetPos + (targetVelocity * travelTime)
+        local px = targetPos.X + targetVelocity.X * travelTime
+        local py = targetPos.Y + targetVelocity.Y * travelTime
+        local pz = targetPos.Z + targetVelocity.Z * travelTime
         
         if isJumping then
-            predictedPos = predictedPos + Vector3.new(0, 4, 0)
+            py = py + 4
         end
         
-        local gravityDrop = 0.5 * gravity * (travelTime * travelTime)
-        predictedPos = predictedPos + Vector3.new(0, gravityDrop * 0.4, 0)
+        local gravityDrop = 0.2 * gravity * travelTime * travelTime
+        py = py + gravityDrop
         
-        return predictedPos
+        return Vector3.new(px, py, pz)
     end
 
 	local aeroprediction = {
@@ -6562,235 +6608,189 @@ run(function()
 			local eps = 1e-9
 			
 			local function isZero(d)
-				return (d > -eps and d < eps)
+				return d > -eps and d < eps
 			end
 
 			local function cuberoot(x)
-				return (x > 0) and math.pow(x, (1 / 3)) or -math.pow(math.abs(x), (1 / 3))
-			end
-
-			local function solveQuadric(c0, c1, c2)
-				local s0, s1
-				local p, q, D
-				p = c1 / (2 * c0)
-				q = c2 / c0
-				D = p * p - q
-
-				if isZero(D) then
-					s0 = -p
-					return s0
-				elseif (D < 0) then
-					return
+				if x > 0 then
+					return math_pow(x, 0.333333333)
 				else
-					local sqrt_D = math.sqrt(D)
-					s0 = sqrt_D - p
-					s1 = -sqrt_D - p
-					return s0, s1
+					return -math_pow(-x, 0.333333333)
 				end
 			end
 
-			local function solveCubic(c0, c1, c2, c3)
-				local s0, s1, s2
-				local num, sub
-				local A, B, C
-				local sq_A, p, q
-				local cb_p, D
+			local function solveQuadric(c0, c1, c2)
+				local p = c1 / (c0 + c0)
+				local q = c2 / c0
+				local D = p * p - q
 
+				if D < eps then
+					if D < -eps then return end
+					return -p
+				end
+				
+				local sqrt_D = math_sqrt(D)
+				return sqrt_D - p, -sqrt_D - p
+			end
+
+			local function solveCubic(c0, c1, c2, c3)
 				if c0 == 0 then
 					return solveQuadric(c1, c2, c3)
 				end
 
-				A = c1 / c0
-				B = c2 / c0
-				C = c3 / c0
-				sq_A = A * A
-				p = (1 / 3) * (-(1 / 3) * sq_A + B)
-				q = 0.5 * ((2 / 27) * A * sq_A - (1 / 3) * A * B + C)
-				cb_p = p * p * p
-				D = q * q + cb_p
+				local A = c1 / c0
+				local B = c2 / c0
+				local C = c3 / c0
+				local sq_A = A * A
+				local p = 0.333333333 * (-0.333333333 * sq_A + B)
+				local q = 0.5 * (0.074074074 * A * sq_A - 0.333333333 * A * B + C)
+				local cb_p = p * p * p
+				local D = q * q + cb_p
 
-				if isZero(D) then
-					if isZero(q) then
+				local s0, s1, s2
+				
+				if D < eps then
+					if D > -eps or isZero(q) then
 						s0 = 0
-						num = 1
 					else
 						local u = cuberoot(-q)
-						s0 = 2 * u
+						s0 = u + u
 						s1 = -u
-						num = 2
 					end
-				elseif (D < 0) then
-					local phi = (1 / 3) * math.acos(-q / math.sqrt(-cb_p))
-					local t = 2 * math.sqrt(-p)
-					s0 = t * math.cos(phi)
-					s1 = -t * math.cos(phi + math.pi / 3)
-					s2 = -t * math.cos(phi - math.pi / 3)
-					num = 3
+				elseif D < 0 then
+					local phi = 0.333333333 * math_acos(-q / math_sqrt(-cb_p))
+					local t = 2 * math_sqrt(-p)
+					s0 = t * math_cos(phi)
+					s1 = -t * math_cos(phi + 1.047197551)
+					s2 = -t * math_cos(phi - 1.047197551)
 				else
-					local sqrt_D = math.sqrt(D)
+					local sqrt_D = math_sqrt(D)
 					local u = cuberoot(sqrt_D - q)
 					local v = -cuberoot(sqrt_D + q)
 					s0 = u + v
-					num = 1
 				end
 
-				sub = (1 / 3) * A
-				if (num > 0) then s0 = s0 - sub end
-				if (num > 1) then s1 = s1 - sub end
-				if (num > 2) then s2 = s2 - sub end
+				local sub = 0.333333333 * A
+				if s0 then s0 = s0 - sub end
+				if s1 then s1 = s1 - sub end
+				if s2 then s2 = s2 - sub end
 
 				return s0, s1, s2
 			end
 
 			local function solveQuartic(c0, c1, c2, c3, c4)
+				local A = c1 / c0
+				local B = c2 / c0
+				local C = c3 / c0
+				local D = c4 / c0
+
+				local sq_A = A * A
+				local p = -0.375 * sq_A + B
+				local q = 0.125 * sq_A * A - 0.5 * A * B + C
+				local r = -0.01171875 * sq_A * sq_A + 0.0625 * sq_A * B - 0.25 * A * C + D
+
 				local s0, s1, s2, s3
-				local coeffs = {}
-				local z, u, v, sub
-				local A, B, C, D
-				local sq_A, p, q, r
-				local num
-
-				A = c1 / c0
-				B = c2 / c0
-				C = c3 / c0
-				D = c4 / c0
-
-				sq_A = A * A
-				p = -0.375 * sq_A + B
-				q = 0.125 * sq_A * A - 0.5 * A * B + C
-				r = -(3 / 256) * sq_A * sq_A + 0.0625 * sq_A * B - 0.25 * A * C + D
-
+				
 				if isZero(r) then
-					coeffs[3] = q
-					coeffs[2] = p
-					coeffs[1] = 0
-					coeffs[0] = 1
-
-					local results = {solveCubic(coeffs[0], coeffs[1], coeffs[2], coeffs[3])}
-					num = #results
-					s0, s1, s2 = results[1], results[2], results[3]
+					s0, s1, s2 = solveCubic(1, 0, p, q)
 				else
-					coeffs[3] = 0.5 * r * p - 0.125 * q * q
-					coeffs[2] = -r
-					coeffs[1] = -0.5 * p
-					coeffs[0] = 1
+					local z = solveCubic(1, -0.5 * p, -r, 0.5 * r * p - 0.125 * q * q) or 0
 
-					s0, s1, s2 = solveCubic(coeffs[0], coeffs[1], coeffs[2], coeffs[3])
-					z = s0
+					local u = z * z - r
+					local v = z + z - p
 
-					u = z * z - r
-					v = 2 * z - p
+					if u < -eps then return end
+					if v < -eps then return end
+					
+					u = u > eps and math_sqrt(u) or 0
+					v = v > eps and math_sqrt(v) or 0
 
-					if isZero(u) then
-						u = 0
-					elseif (u > 0) then
-						u = math.sqrt(u)
-					else
-						return
-					end
-					if isZero(v) then
-						v = 0
-					elseif (v > 0) then
-						v = math.sqrt(v)
-					else
-						return
-					end
-
-					coeffs[2] = z - u
-					coeffs[1] = q < 0 and -v or v
-					coeffs[0] = 1
-
-					local results = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
-					num = #results
-					s0, s1 = results[1], results[2]
-
-					coeffs[2] = z + u
-					coeffs[1] = q < 0 and v or -v
-					coeffs[0] = 1
-
-					if (num == 0) then
-						local results2 = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
-						num = num + #results2
-						s0, s1 = results2[1], results2[2]
-					end
-					if (num == 1) then
-						local results2 = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
-						num = num + #results2
-						s1, s2 = results2[1], results2[2]
-					end
-					if (num == 2) then
-						local results2 = {solveQuadric(coeffs[0], coeffs[1], coeffs[2])}
-						num = num + #results2
-						s2, s3 = results2[1], results2[2]
-					end
+					local qSign = q < 0 and -v or v
+					s0, s1 = solveQuadric(1, qSign, z - u)
+					
+					local qSign2 = q < 0 and v or -v
+					local s2_temp, s3_temp = solveQuadric(1, qSign2, z + u)
+					if s2_temp then s2 = s2_temp end
+					if s3_temp then s3 = s3_temp end
 				end
 
-				sub = 0.25 * A
-				if (num > 0) then s0 = s0 - sub end
-				if (num > 1) then s1 = s1 - sub end
-				if (num > 2) then s2 = s2 - sub end
-				if (num > 3) then s3 = s3 - sub end
+				local sub = 0.25 * A
+				if s0 then s0 = s0 - sub end
+				if s1 then s1 = s1 - sub end
+				if s2 then s2 = s2 - sub end
+				if s3 then s3 = s3 - sub end
 
 				return {s3, s2, s1, s0}
 			end
 
-			local disp = targetPos - origin
+			local dx = targetPos.X - origin.X
+			local dy = targetPos.Y - origin.Y
+			local dz = targetPos.Z - origin.Z
 			local p, q, r = targetVelocity.X, targetVelocity.Y, targetVelocity.Z
-			local h, j, k = disp.X, disp.Y, disp.Z
-			local l = -.5 * gravity
+			local h, j, k = dx, dy, dz
+			local l = -0.5 * gravity
 
-			if math.abs(q) > 0.01 and playerGravity and playerGravity > 0 then
-				local estTime = (disp.Magnitude / projectileSpeed)
-				local origq = q
-				for i = 1, 100 do
-					q = origq - (.5 * playerGravity) * estTime
-					local velo = targetVelocity * 0.016
-					local ray = workspace:Raycast(Vector3.new(targetPos.X, targetPos.Y, targetPos.Z), 
-						Vector3.new(velo.X, (q * estTime) - playerHeight, velo.Z), params)
-					
-					if ray then
-						local newTarget = ray.Position + Vector3.new(0, playerHeight, 0)
-						estTime = estTime - math.sqrt(((targetPos - newTarget).Magnitude * 2) / playerGravity)
-						targetPos = newTarget
-						j = (targetPos - origin).Y
-						q = 0
-						break
-					else
-						break
-					end
+			if math_abs(q) > 0.01 and playerGravity and playerGravity > 0 then
+				local mag = math_sqrt(dx * dx + dy * dy + dz * dz)
+				local estTime = mag / projectileSpeed
+				q = q - 0.5 * playerGravity * estTime
+				
+				local vx = targetVelocity.X * 0.016
+				local vy = q * estTime - playerHeight
+				local vz = targetVelocity.Z * 0.016
+				
+				local ray = workspace:Raycast(
+					targetPos,
+					Vector3.new(vx, vy, vz),
+					params
+				)
+				
+				if ray then
+					targetPos = ray.Position + Vector3.new(0, playerHeight, 0)
+					j = targetPos.Y - origin.Y
+					q = 0
 				end
 			end
 
 			local solutions = solveQuartic(
-				l*l,
-				-2*q*l,
-				q*q - 2*j*l - projectileSpeed*projectileSpeed + p*p + r*r,
-				2*j*q + 2*h*p + 2*k*r,
-				j*j + h*h + k*k
+				l * l,
+				-2 * q * l,
+				q * q - 2 * j * l - projectileSpeed * projectileSpeed + p * p + r * r,
+				2 * j * q + 2 * h * p + 2 * k * r,
+				j * j + h * h + k * k
 			)
 			
 			if solutions then
-				local posRoots = {}
-				for _, v in solutions do
-					if v > 0 then
-						table.insert(posRoots, v)
+				local bestTime
+				for i = 1, 4 do
+					local v = solutions[i]
+					if v and v > 0 and (not bestTime or v < bestTime) then
+						bestTime = v
 					end
 				end
-				posRoots[1] = posRoots[1]
 
-				if posRoots[1] then
-					local t = posRoots[1]
-					local d = (h + p*t)/t
-					local e = (j + q*t - l*t*t)/t
-					local f = (k + r*t)/t
-					return origin + Vector3.new(d, e, f)
+				if bestTime then
+					local t = bestTime
+					local d = (h + p * t) / t
+					local e = (j + q * t - l * t * t) / t
+					local f = (k + r * t) / t
+					return Vector3.new(
+						origin.X + d,
+						origin.Y + e,
+						origin.Z + f
+					)
 				end
 			elseif gravity == 0 then
-				local t = (disp.Magnitude / projectileSpeed)
-				local d = (h + p*t)/t
-				local e = (j + q*t - l*t*t)/t
-				local f = (k + r*t)/t
-				return origin + Vector3.new(d, e, f)
+				local mag = math_sqrt(dx * dx + dy * dy + dz * dz)
+				local t = mag / projectileSpeed
+				local d = (h + p * t) / t
+				local e = (j + q * t - l * t * t) / t
+				local f = (k + r * t) / t
+				return Vector3.new(
+					origin.X + d,
+					origin.Y + e,
+					origin.Z + f
+				)
 			end
 		end
 	}
@@ -6892,7 +6892,6 @@ run(function()
 				
 				old = bedwars.ProjectileController.calculateImportantLaunchValues
 				bedwars.ProjectileController.calculateImportantLaunchValues = function(...)
-                    debug.profilebegin("ProjectileAimbot")
 					hovering = true
 					local self, projmeta, worldmeta, origin, shootpos = ...
 					local originPos = entitylib.isAlive and (shootpos or entitylib.character.RootPart.Position) or Vector3.zero
@@ -6901,9 +6900,14 @@ run(function()
                     local targetingPot = false
                     local potTarget = nil
 
-                    if selectedTarget and selectedTarget.Character and selectedTarget.Character.PrimaryPart and (selectedTarget.Character.PrimaryPart.Position - originPos).Magnitude <= Range.Value then
-                        plr = selectedTarget
-                    else
+                    if selectedTarget and selectedTarget.Character and selectedTarget.Character.PrimaryPart then
+						local dist = (selectedTarget.Character.PrimaryPart.Position - originPos).Magnitude
+						if dist <= Range.Value then
+							plr = selectedTarget
+						end
+                    end
+					
+					if not plr then
                         if TargetPots.Enabled then
                             potTarget = getPotTarget(originPos)
                             if potTarget then
@@ -6912,7 +6916,7 @@ run(function()
                         end
                         
                         if not targetingPot then
-                            if (PAMode.Value == 'AeroPA' and AeroPATargetPriority.Value ~= 'Distance') then
+                            if PAMode.Value == 'AeroPA' and AeroPATargetPriority.Value ~= 'Distance' then
                                 plr = getAeroPATarget(originPos)
                             else
                                 plr = entitylib.EntityMouse({
@@ -6935,46 +6939,50 @@ run(function()
 					
 					if not shouldPAWork() then
 						hovering = false
-                        debug.profileend()
 						return old(...)
 					end
+					
                     if targetingPot and potTarget then
-                    local pos = shootpos or self:getLaunchPosition(origin)
-                    if not pos then
-                        hovering = false
-                        debug.profileend()
-                        return old(...)
-                    end
-                    
-                    local meta = projmeta:getProjectileMeta()
-                    local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
-                    local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
-                    local projSpeed = (meta.launchVelocity or 100)
-                    local offsetpos = pos + projmeta.fromPositionOffset
-                    
-                    local targetPos = potTarget.Position + Vector3.new(0, 1.2, 0)  
-                    local newlook = CFrame.new(offsetpos, targetPos)
-                    
-                    hovering = false
-                    return {
-                        initialVelocity = newlook.LookVector * projSpeed,
-                        positionFrom = offsetpos,
-                        deltaT = lifetime,
-                        gravitationalAcceleration = gravity,
-                        drawDurationSeconds = 5
-                    }
-                    
-                elseif plr and plr.Character and plr[TargetPart.Value] and (plr[TargetPart.Value].Position - originPos).Magnitude <= Range.Value then
 						local pos = shootpos or self:getLaunchPosition(origin)
 						if not pos then
 							hovering = false
-                            debug.profileend()
+							return old(...)
+						end
+						
+						local meta = projmeta:getProjectileMeta()
+						local lifetime = (worldmeta and meta.predictionLifetimeSec or meta.lifetimeSec or 3)
+						local gravity = (meta.gravitationalAcceleration or 196.2) * projmeta.gravityMultiplier
+						local projSpeed = (meta.launchVelocity or 100)
+						local offsetpos = pos + projmeta.fromPositionOffset
+						
+						local targetPos = potTarget.Position + Vector3.new(0, 1.2, 0)
+						local newlook = CFrame.new(offsetpos, targetPos)
+						
+						hovering = false
+						return {
+							initialVelocity = newlook.LookVector * projSpeed,
+							positionFrom = offsetpos,
+							deltaT = lifetime,
+							gravitationalAcceleration = gravity,
+							drawDurationSeconds = 5
+						}
+                    
+                elseif plr and plr.Character and plr[TargetPart.Value] then
+						local dist = (plr[TargetPart.Value].Position - originPos).Magnitude
+						if dist > Range.Value then
+							hovering = false
+							return old(...)
+						end
+						
+						local pos = shootpos or self:getLaunchPosition(origin)
+						if not pos then
+							hovering = false
 							return old(...)
 						end
 	
 						local isFrostStaffProjectile = false
 						if projmeta and projmeta.projectile then
-							isFrostStaffProjectile = projmeta.projectile:find("frosty_snowball") or false
+							isFrostStaffProjectile = projmeta.projectile:find("frosty_snowball") ~= nil
 						end
 						
 						local usingFrostStaff = false
@@ -6983,9 +6991,10 @@ run(function()
 							usingFrostStaff = isFrostStaff(store.hand.tool)
 							if usingFrostStaff then
 								isFrostStaffProjectile = true
-								if store.hand.tool.Name:find("frost_staff_2") then
+								local toolName = store.hand.tool.Name
+								if toolName:find("frost_staff_2") then
 									frostStaffTier = 2
-								elseif store.hand.tool.Name:find("frost_staff_3") then
+								elseif toolName:find("frost_staff_3") then
 									frostStaffTier = 3
 								else
 									frostStaffTier = 1
@@ -6993,17 +7002,15 @@ run(function()
 							end
 						end
 
-						local isTurretProjectile = projmeta.projectile:find('turret') or projmeta.projectile:find('vulcan') or false
+						local isTurretProjectile = projmeta.projectile:find('turret') ~= nil or projmeta.projectile:find('vulcan') ~= nil
 
 						if (not OtherProjectiles.Enabled) and not projmeta.projectile:find('arrow') and not isFrostStaffProjectile and not isTurretProjectile then
 							hovering = false
-                            debug.profileend()
 							return old(...)
 						end
 
 						if table.find(Blacklist.ListEnabled, projmeta.projectile) then
 							hovering = false
-                            debug.profileend()
 							return old(...)
 						end
 	
@@ -7016,7 +7023,7 @@ run(function()
 						local playerGravity = workspace.Gravity
 	
 						if balloons and balloons > 0 then
-							playerGravity = (workspace.Gravity * (1 - ((balloons >= 4 and 1.2 or balloons >= 3 and 1 or 0.975))))
+							playerGravity = workspace.Gravity * (1 - (balloons >= 4 and 1.2 or balloons >= 3 and 1 or 0.975))
 						end
 	
 						if plr.Character.PrimaryPart:FindFirstChild('rbxassetid://8200754399') then
@@ -7036,15 +7043,18 @@ run(function()
 							if isTurretProjectile then
 								local targetPos = plr[TargetPart.Value].Position
 								local targetVelocity = plr[TargetPart.Value].Velocity
-								local distance = (targetPos - offsetpos).Magnitude
+								
+								local dx = targetPos.X - offsetpos.X
+								local dy = targetPos.Y - offsetpos.Y
+								local dz = targetPos.Z - offsetpos.Z
+								local distance = math_sqrt(dx * dx + dy * dy + dz * dz)
 								local timeToReach = distance / projSpeed
 								
-								local predictedPos = targetPos + (targetVelocity * timeToReach)
+								local px = targetPos.X + targetVelocity.X * timeToReach
+								local py = targetPos.Y + targetVelocity.Y * timeToReach + 0.5 * gravity * timeToReach * timeToReach
+								local pz = targetPos.Z + targetVelocity.Z * timeToReach
 								
-								local dropCompensation = 0.5 * gravity * (timeToReach * timeToReach)
-								predictedPos = predictedPos + Vector3.new(0, dropCompensation, 0)
-								
-								local newlook = CFrame.new(offsetpos, predictedPos)
+								local newlook = CFrame.new(offsetpos, Vector3.new(px, py, pz))
 								
 								if targetinfo and targetinfo.Targets then
 									targetinfo.Targets[plr] = tick() + 1
@@ -7059,25 +7069,20 @@ run(function()
 									drawDurationSeconds = 5
 								}
 							end
+							
 							if usingFrostStaff then
 								local newlook = CFrame.new(offsetpos, plr[TargetPart.Value].Position) * CFrame.new(projmeta.projectile == 'owl_projectile' and Vector3.zero or Vector3.new(bedwars.BowConstantsTable.RelX, bedwars.BowConstantsTable.RelY, bedwars.BowConstantsTable.RelZ))
 								
 								local targetVelocity = projmeta.projectile == 'telepearl' and Vector3.zero or plr[TargetPart.Value].Velocity
 								local jumpValue = plr.Jumping and 50 or nil
 								
-								local frostSpeed = 180 
-								
-								if frostStaffTier == 2 then
-									frostSpeed = 190
-								elseif frostStaffTier == 3 then
-									frostSpeed = 200
-								end
+								local frostSpeed = frostStaffTier == 3 and 200 or frostStaffTier == 2 and 190 or 180
 								
 								local calc
 								if PAMode.Value == 'AeroPA' then
 									calc = simpleAeroPAPrediction(newlook.p, plr[TargetPart.Value].Position, targetVelocity, frostSpeed, gravity, plr.Jumping)
 								else
-									calc = prediction.SolveTrajectory(newlook.p, frostSpeed, gravity, plr[TargetPart.Value].Position, targetVelocity, playerGravity, plr.HipHeight, jumpValue, rayCheck)
+									calc = aeroprediction.SolveTrajectory(newlook.p, frostSpeed, gravity, plr[TargetPart.Value].Position, targetVelocity, playerGravity, plr.HipHeight, jumpValue, rayCheck)
 								end
 								
 								if calc then
@@ -7086,11 +7091,9 @@ run(function()
 									end
 									
 									local customDrawDuration = getFrostStaffCooldown(store.hand.tool.Name)
-									local chargePercent = 100
 									
 									if PAMode.Value == 'AeroPA' and AeroPAChargePercent then
-										chargePercent = AeroPAChargePercent.Value
-										customDrawDuration = customDrawDuration * (chargePercent / 100)
+										customDrawDuration = customDrawDuration * (AeroPAChargePercent.Value / 100)
 									end
 									
 									hovering = false
@@ -7105,11 +7108,19 @@ run(function()
 							elseif store.hand.tool.Name:find("spellbook") then
 								local targetPos = plr.RootPart.Position
 								local selfPos = lplr.Character.PrimaryPart.Position
-								local expectedTime = (selfPos - targetPos).Magnitude / 160
-								targetPos = targetPos + (plr.RootPart.Velocity * expectedTime)
+								local dx = selfPos.X - targetPos.X
+								local dy = selfPos.Y - targetPos.Y
+								local dz = selfPos.Z - targetPos.Z
+								local distance = math_sqrt(dx * dx + dy * dy + dz * dz)
+								local expectedTime = distance / 160
+								
+								local px = targetPos.X + plr.RootPart.Velocity.X * expectedTime
+								local py = targetPos.Y + plr.RootPart.Velocity.Y * expectedTime
+								local pz = targetPos.Z + plr.RootPart.Velocity.Z * expectedTime
+								
 								hovering = false
 								return {
-									initialVelocity = (targetPos - selfPos).Unit * 160,
+									initialVelocity = (Vector3.new(px, py, pz) - selfPos).Unit * 160,
 									positionFrom = offsetpos,
 									deltaT = 2,
 									gravitationalAcceleration = 1,
@@ -7118,11 +7129,19 @@ run(function()
 							elseif store.hand.tool.Name:find("chakram") then
 								local targetPos = plr.RootPart.Position
 								local selfPos = lplr.Character.PrimaryPart.Position
-								local expectedTime = (selfPos - targetPos).Magnitude / 80
-								targetPos = targetPos + (plr.RootPart.Velocity * expectedTime)
+								local dx = selfPos.X - targetPos.X
+								local dy = selfPos.Y - targetPos.Y
+								local dz = selfPos.Z - targetPos.Z
+								local distance = math_sqrt(dx * dx + dy * dy + dz * dz)
+								local expectedTime = distance / 80
+								
+								local px = targetPos.X + plr.RootPart.Velocity.X * expectedTime
+								local py = targetPos.Y + plr.RootPart.Velocity.Y * expectedTime
+								local pz = targetPos.Z + plr.RootPart.Velocity.Z * expectedTime
+								
 								hovering = false
 								return {
-									initialVelocity = (targetPos - selfPos).Unit * 80,
+									initialVelocity = (Vector3.new(px, py, pz) - selfPos).Unit * 80,
 									positionFrom = offsetpos,
 									deltaT = 2,
 									gravitationalAcceleration = 1,
@@ -7140,7 +7159,7 @@ run(function()
 						if PAMode.Value == 'AeroPA' then
 							calc = simpleAeroPAPrediction(newlook.p, plr[TargetPart.Value].Position, targetVelocity, projSpeed, gravity, plr.Jumping)
 						else
-							calc = prediction.SolveTrajectory(newlook.p, projSpeed, gravity, plr[TargetPart.Value].Position, targetVelocity, playerGravity, plr.HipHeight, jumpValue, rayCheck)
+							calc = aeroprediction.SolveTrajectory(newlook.p, projSpeed, gravity, plr[TargetPart.Value].Position, targetVelocity, playerGravity, plr.HipHeight, jumpValue, rayCheck)
 						end
 						
 						if calc then
@@ -7150,8 +7169,7 @@ run(function()
 							
 							local customDrawDuration = 5
 							if PAMode.Value == 'AeroPA' and AeroPAChargePercent then
-								local maxChargeTime = 0.58
-								customDrawDuration = (AeroPAChargePercent.Value / 100) * maxChargeTime
+								customDrawDuration = 0.58 * (AeroPAChargePercent.Value / 100)
 							end
 							
 							hovering = false
@@ -7160,13 +7178,12 @@ run(function()
 								positionFrom = offsetpos,
 								deltaT = lifetime,
 								gravitationalAcceleration = gravity,
-								drawDurationSeconds = customDrawDuration  
+								drawDurationSeconds = customDrawDuration
 							}
 						end
 					end
 	
 					hovering = false
-                    debug.profileend()
 					return old(...)
 				end
 			else
@@ -7191,7 +7208,7 @@ run(function()
 				end)
 			end
 		end,
-		Tooltip = 'Unified projectile aimbot with multiple modes. AeroPA includes charge control.'
+		Tooltip = 'Ultra-optimized projectile aimbot - minimal performance impact'
 	})
 	
 	PAMode = ProjectileAimbot:CreateDropdown({
