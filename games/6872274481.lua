@@ -1637,13 +1637,6 @@ run(function()
     local MouseBindToggle
     local MouseBindList
     local KeybindMode
-    local MobileButtonToggle
-    local ButtonSize
-    local ButtonPosX
-    local ButtonPosY
-    local ButtonColor
-    local ButtonTransparency
-    local TextSize
     local CurrentKeybind = Enum.KeyCode.LeftAlt
     local CurrentMouseBind = Enum.UserInputType.MouseButton2
     local UseMouseBind = false
@@ -1653,8 +1646,6 @@ run(function()
     local IgnoreNextSlotChange = false
     local InputStartTime = 0
     local ActivationScheduled = nil
-    local mobileControls = {}
-    local isMobileButtonPressed = false
     
     local task_wait = task.wait
     local task_spawn = task.spawn
@@ -1791,50 +1782,6 @@ run(function()
         FireDelays[tool.Name] = now + (projectileSource.fireDelaySec or 0.5)
     end
 
-    local function createMobileButton()
-        local size = ButtonSize.Value
-        local posX = ButtonPosX.Value / 100
-        local posY = ButtonPosY.Value / 100
-        
-        local button = Instance.new("TextButton")
-        button.Name = "AutoClickButton"
-        button.Size = UDim2.new(0, size, 0, size)
-        button.Position = UDim2.new(posX, 0, posY, 0)
-        button.AnchorPoint = Vector2.new(0.5, 0.5)
-        button.BackgroundTransparency = ButtonTransparency.Value / 100
-        button.BackgroundColor3 = Color3.fromHSV(ButtonColor.Hue, ButtonColor.Sat, ButtonColor.Value)
-        button.BorderSizePixel = 0
-        button.Text = "AC"
-        button.TextScaled = false
-        button.TextSize = TextSize.Value
-        button.TextColor3 = Color3.fromRGB(255, 255, 255)
-        button.Font = Enum.Font.GothamBold
-        button.TextStrokeTransparency = 0.5
-        button.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0.25, 0)
-        corner.Parent = button
-        
-        local stroke = Instance.new("UIStroke")
-        stroke.Color = Color3.fromRGB(255, 255, 255)
-        stroke.Thickness = 2
-        stroke.Transparency = 0.3
-        stroke.Parent = button
-        
-        return button
-    end
-
-    local function cleanupMobileControls()
-        for _, control in pairs(mobileControls) do
-            if control then
-                control:Destroy()
-            end
-        end
-        mobileControls = {}
-        isMobileButtonPressed = false
-    end
-
     local function AutoClick()
         if Thread then
             task.cancel(Thread)
@@ -1845,7 +1792,7 @@ run(function()
             local cachedToolType = nil
             local toolCheckCounter = 0
             
-            while AutoClicker.Enabled do
+            repeat
                 if KeybindEnabled and KeybindMode.Value == 'Hold' then
                     if toolCheckCounter % 3 == 0 then 
                         UpdateKeybindState()
@@ -1894,7 +1841,7 @@ run(function()
 
                 local waitTime = 1 / (currentCPS and currentCPS.GetRandomValue() or 7)
                 task_wait(waitTime)
-            end
+            until not AutoClicker.Enabled
         end)
     end
 
@@ -1964,29 +1911,30 @@ run(function()
         Function = function(callback)
             if callback then
                 if isMobileDevice then
-                    local gui = Instance.new("ScreenGui")
-                    gui.Name = "AutoClickerControls"
-                    gui.ResetOnSpawn = false
-                    gui.Parent = lplr.PlayerGui
-                    
-                    local clickButton = createMobileButton()
-                    clickButton.Parent = gui
-                    
-                    mobileControls.ClickButton = clickButton
-                    mobileControls.ScreenGui = gui
-                    
-                    AutoClicker:Clean(clickButton.MouseButton1Down:Connect(function()
-                        isMobileButtonPressed = true
-                        AutoClick()
+                    AutoClicker:Clean(inputService.InputBegan:Connect(function(input)
+                        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                            AutoClick()
+                        end
                     end))
-                    
-                    AutoClicker:Clean(clickButton.MouseButton1Up:Connect(function()
-                        isMobileButtonPressed = false
-                        if Thread then
+
+                    AutoClicker:Clean(inputService.InputEnded:Connect(function(input)
+                        if input.UserInputType == Enum.UserInputType.MouseButton1 and Thread and (os.clock() - getgenv().swapping) > 0.12 then
                             task.cancel(Thread)
                             Thread = nil
                         end
                     end))
+
+                    pcall(function()
+                        for _, v in {'2', '5'} do
+                            AutoClicker:Clean(lplr.PlayerGui.MobileUI[v].MouseButton1Down:Connect(AutoClick))
+                            AutoClicker:Clean(lplr.PlayerGui.MobileUI[v].MouseButton1Up:Connect(function()
+                                if Thread then
+                                    task.cancel(Thread)
+                                    Thread = nil
+                                end
+                            end))
+                        end
+                    end)
                     
                 elseif KeybindEnabled then
                     AutoClicker:Clean(inputService.InputBegan:Connect(function(input)
@@ -2062,103 +2010,11 @@ run(function()
                 end
             else
                 StopAutoClick()
-                cleanupMobileControls()
                 ammoCache = {} 
                 lastToolName = nil
             end
         end,
         Tooltip = 'Clicks for you '
-    })
-    
-    local isMobile = isMobileDevice
-    
-    ButtonSize = AutoClicker:CreateSlider({
-        Name = 'Button Size',
-        Min = 40,
-        Max = 120,
-        Default = 60,
-        Visible = isMobile,
-        Suffix = function(val) return 'px' end,
-        Tooltip = 'Size of the mobile button',
-        Function = function()
-            if AutoClicker.Enabled then
-                SafeToggleRestart()
-            end
-        end
-    })
-    
-    ButtonPosX = AutoClicker:CreateSlider({
-        Name = 'Position X',
-        Min = 10,
-        Max = 90,
-        Default = 85,
-        Visible = isMobile,
-        Suffix = function(val) return '%' end,
-        Tooltip = 'Horizontal position (left to right)',
-        Function = function()
-            if AutoClicker.Enabled then
-                SafeToggleRestart()
-            end
-        end
-    })
-    
-    ButtonPosY = AutoClicker:CreateSlider({
-        Name = 'Position Y',
-        Min = 10,
-        Max = 90,
-        Default = 50,
-        Visible = isMobile,
-        Suffix = function(val) return '%' end,
-        Tooltip = 'Vertical position (top to bottom)',
-        Function = function()
-            if AutoClicker.Enabled then
-                SafeToggleRestart()
-            end
-        end
-    })
-    
-    ButtonColor = AutoClicker:CreateColorSlider({
-        Name = 'Button Color',
-        DefaultHue = 0.44,
-        DefaultSat = 1,
-        DefaultValue = 0.35,
-        Visible = isMobile,
-        Tooltip = 'Color of the button background',
-        Function = function()
-            if AutoClicker.Enabled then
-                SafeToggleRestart()
-            end
-        end
-    })
-    
-    ButtonTransparency = AutoClicker:CreateSlider({
-        Name = 'Transparency',
-        Min = 0,
-        Max = 80,
-        Default = 20,
-        Visible = isMobile,
-        Suffix = function(val) return '%' end,
-        Tooltip = 'Button transparency (0 = solid)',
-        Function = function()
-            if AutoClicker.Enabled then
-                SafeToggleRestart()
-            end
-        end
-    })
-    
-    TextSize = AutoClicker:CreateSlider({
-        Name = 'Text Size',
-        Min = 16,
-        Max = 40,
-        Default = 24,
-        Visible = isMobile,
-        Suffix = function(val) return 'px' end,
-        Tooltip = 'Size of AC text',
-        Function = function()
-            if AutoClicker.Enabled then
-                SafeToggleRestart()
-            end
-        end
     })
     
     KeybindToggle = AutoClicker:CreateToggle({
@@ -2221,6 +2077,7 @@ run(function()
     MouseBindToggle = AutoClicker:CreateToggle({
         Name = 'Use Mouse Button',
         Default = false,
+        Visible = false,
         Tooltip = 'Use a mouse button instead of keyboard key',
         Function = function(callback)
             UseMouseBind = callback
@@ -2262,26 +2119,6 @@ run(function()
             SafeToggleRestart()
         end
     })
-
-
-    if isMobileDevice then
-        KeybindToggle.Object.Visible = false
-        KeybindList.Object.Visible = false
-        MouseBindToggle.Object.Visible = false
-        MouseBindList.Object.Visible = false
-        KeybindMode.Object.Visible = false
-    else
-        if ButtonSize.Object then ButtonSize.Object.Visible = false end
-        if ButtonPosX.Object then ButtonPosX.Object.Visible = false end
-        if ButtonPosY.Object then ButtonPosY.Object.Visible = false end
-        if ButtonColor.Object then ButtonColor.Object.Visible = false end
-        if ButtonTransparency.Object then ButtonTransparency.Object.Visible = false end
-        if TextSize.Object then TextSize.Object.Visible = false end
-        KeybindList.Object.Visible = false
-        MouseBindToggle.Object.Visible = false
-        MouseBindList.Object.Visible = false
-        KeybindMode.Object.Visible = false
-    end
     
     PlaceBlocksToggle = AutoClicker:CreateToggle({
         Name = 'Place Blocks',
@@ -4589,6 +4426,9 @@ run(function()
     local CustomHitReg
     local CustomHitRegSlider
     local lastCustomHitTime = 0
+    local AirHit
+    local AirHitsChance
+    local CanHit = true
     
     task.spawn(function()
         AttackRemote = bedwars.Client:Get(remotes.AttackEntity)
@@ -5115,6 +4955,32 @@ run(function()
 
 									if not canHit and not extendedRangeCheck then continue end
 
+                                    if AirHit.Enabled then
+                                        local chance = math.random(0, 100)
+                                        local state = v.Character.Humanoid:GetState()
+                                        if state == Enum.HumanoidStateType.Jumping then
+                                            if chance > AirHitsChance.Value then 
+                                                CanHit = false
+                                                continue
+                                            else
+                                                CanHit = true
+                                            end
+                                        elseif state == Enum.HumanoidStateType.Freefall then
+                                            if chance > AirHitsChance.Value then
+                                                CanHit = false 
+                                                continue 
+                                            else
+                                                CanHit = true
+                                            end
+                                        else
+                                            CanHit = true
+                                        end
+                                    else
+                                        CanHit = true
+                                    end
+
+                                    if not CanHit then continue end
+
                                     if SyncHits.Enabled then
                                         local swingSpeed = SwingTime.Enabled and SwingTimeSlider.Value or (meta.sword.respectAttackSpeedForEffects and meta.sword.attackSpeed or 0.42)
                                         if (tick() - swingCooldown) < (swingSpeed * 0.7) then 
@@ -5396,6 +5262,30 @@ run(function()
         Tooltip = 'Maximum hits per second',
         Visible = false
     })
+    
+    AirHit = Killaura:CreateToggle({
+        Name = "Air Hits",
+        Default = true,
+        Tooltip = 'enables the air hits feature',
+        Function = function(v)
+            if AirHitsChance then
+                AirHitsChance.Object.Visible = v
+            end
+        end
+    })
+    
+    AirHitsChance = Killaura:CreateSlider({
+        Name = 'Air Hits Chance',
+        Min = 0,
+        Max = 100,
+        Default = 100,
+        Suffix = "%",
+        Decimal = 5,
+        Tooltip = 'checks if it can hit someone when they are in the air',
+        Darker = true,
+        Visible = false
+    })
+    
     ContinueSwingTime = Killaura:CreateSlider({
         Name = 'Swing Duration',
         Min = 0,  
@@ -33615,17 +33505,23 @@ end)
 run(function()
 	local LayeredClothing
 	local desc
+	local myUserId = lplr.UserId
 	
 	local function itemAdded(v, manual)
-		return
+		if (not v:GetAttribute('LayeredClothing')) and ((v:IsA('Accessory') and (not v:GetAttribute('InvItem')) and (not v:GetAttribute('ArmorSlot'))) or v:IsA('ShirtGraphic') or v:IsA('Shirt') or v:IsA('Pants') or v:IsA('BodyColors') or manual) then
+			repeat
+				task.wait()
+				v.Parent = game
+			until v.Parent == game
+			v:ClearAllChildren()
+			v:Destroy()
+		end
 	end
 	
 	local function characterAdded(char)
 		task.wait(0.1)
 		char.Character.Archivable = true
 		local clone = char.Character:Clone()
-		
-		local myUserId = lplr.UserId
 		
 		repeat
 			if pcall(function()
@@ -33654,7 +33550,20 @@ run(function()
 		}
 		originalDesc.JumpAnimation = desc.JumpAnimation
 		desc.HeightScale = originalDesc.HeightScale
+
+		for _, v in clone:GetChildren() do
+			if v:IsA('Accessory') or v:IsA('ShirtGraphic') or v:IsA('Shirt') or v:IsA('Pants') then
+				v:ClearAllChildren()
+				v:Destroy()
+			end
+		end
+
 		clone.Humanoid:ApplyDescriptionClientServer(desc)
+		
+		for _, v in char.Character:GetChildren() do
+			itemAdded(v)
+		end
+		
 		LayeredClothing:Clean(char.Character.ChildAdded:Connect(itemAdded))
 
 		for _, v in clone:WaitForChild('Animate'):GetChildren() do
@@ -33688,8 +33597,10 @@ run(function()
 		local localface = char.Character:FindFirstChild('face', true)
 		local cloneface = clone:FindFirstChild('face', true)
 		if localface and cloneface then
+			itemAdded(localface, true)
 			cloneface.Parent = char.Head
 		end
+		
 		originalDesc:SetEmotes(desc:GetEmotes())
 		originalDesc:SetEquippedEmotes(desc:GetEquippedEmotes())
 		clone:ClearAllChildren()
@@ -33711,7 +33622,7 @@ run(function()
 				end
 			end
 		end,
-		Tooltip = 'testing (client-sided)'
+		Tooltip = 'Enables layered clothing from your Roblox avatar (client-sided)'
 	})
 end)
 
