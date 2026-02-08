@@ -1,4 +1,5 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
+--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 repeat task.wait() until game:IsLoaded()
 if shared.vape then shared.vape:Uninject() end
 
@@ -235,41 +236,6 @@ local function checkAccountActive()
     return false
 end
 
-local activeCheckRunning = false
-local function startActiveCheck()
-    if activeCheckRunning then return end
-    activeCheckRunning = true
-    
-    while task.wait(30) do
-        if shared.vape then
-            local isActive = checkAccountActive()
-            
-            if not isActive then
-                game.StarterGui:SetCore("SendNotification", {
-                    Title = "access taken",
-                    Text = "your account has been deactivated.",
-                    Duration = 5
-                })
-                
-                task.wait(2)
-                
-                if shared.vape and shared.vape.Uninject then
-                    shared.vape:Uninject()
-                else
-                    shared.vape = nil
-                    if getgenv and getgenv().vape then
-                        getgenv().vape = nil
-                    end
-                end
-                break
-            end
-        else
-            break
-        end
-    end
-    activeCheckRunning = false
-end
-
 local function finishLoading()
 	vape.Init = nil
 	vape:Load()
@@ -279,12 +245,6 @@ local function finishLoading()
 			task.wait(10)
 		until not vape.Loaded
 	end)
-
-    if shared.ValidatedUsername then
-        task.spawn(function()
-            startActiveCheck()
-        end)
-    end
 
 	local teleportedServers
 	vape:Clean(playersService.LocalPlayer.OnTeleport:Connect(function()
