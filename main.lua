@@ -1,5 +1,4 @@
 --This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 repeat task.wait() until game:IsLoaded()
 if shared.vape then shared.vape:Uninject() end
 
@@ -207,6 +206,72 @@ local function downloadFile(path, func)
 	return (func or readfile)(path)
 end
 
+local function downloadPremadeProfiles()
+    local httpService = game:GetService('HttpService')
+    if not isfolder('newvape/profiles/premade') then
+        makefolder('newvape/profiles/premade')
+    end
+    
+    local commit = readfile('newvape/profiles/commit.txt')
+    if not commit then
+        commit = 'main'
+    end
+    
+    local success, response = pcall(function()
+        return game:HttpGet('https://api.github.com/repos/poopparty/poopparty/contents/profiles/premade?ref='..commit)
+    end)
+    
+    if success and response then
+        local files = httpService:JSONDecode(response)
+        
+        if type(files) == 'table' then
+            for _, file in pairs(files) do
+                if file.name and file.name:find('.txt') and file.name ~= 'commit.txt' then
+                    local filePath = 'newvape/profiles/premade/'..file.name
+                    
+                    if not isfile(filePath) then
+                        if file.download_url then
+                            local downloadSuccess, fileContent = pcall(function()
+                                return game:HttpGet(file.download_url, true)
+                            end)
+                            
+                            if downloadSuccess and fileContent and fileContent ~= '404: Not Found' then
+                                writefile(filePath, fileContent)
+                            end
+                        else
+                            local downloadSuccess, fileContent = pcall(function()
+                                return game:HttpGet('https://raw.githubusercontent.com/poopparty/poopparty/'..commit..'/profiles/premade/'..file.name, true)
+                            end)
+                            
+                            if downloadSuccess and fileContent ~= '404: Not Found' then
+                                writefile(filePath, fileContent)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    else
+        local profiles = {
+            'aero6872274481.txt',
+            'aero6872265039.txt',
+        }
+        
+        for _, profileName in ipairs(profiles) do
+            local filePath = 'newvape/profiles/premade/'..profileName
+            if not isfile(filePath) then
+                local downloadSuccess, fileContent = pcall(function()
+                    return game:HttpGet('https://raw.githubusercontent.com/poopparty/poopparty/'..commit..'/profiles/premade/'..profileName, true)
+                end)
+                
+                if downloadSuccess and fileContent ~= '404: Not Found' then
+                    writefile(filePath, fileContent)
+                end
+            end
+        end
+    end
+end
+
 local function checkAccountActive()
     local ACCOUNT_SYSTEM_URL = "https://raw.githubusercontent.com/poopparty/whitelistcheck/main/AccountSystem.lua"
     
@@ -285,6 +350,8 @@ local gui = readfile('newvape/profiles/gui.txt')
 if not isfolder('newvape/assets/'..gui) then
 	makefolder('newvape/assets/'..gui)
 end
+
+downloadPremadeProfiles()
 
 vape = loadstring(downloadFile('newvape/guis/'..gui..'.lua'), 'gui')()
 shared.vape = vape
