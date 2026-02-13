@@ -1471,17 +1471,23 @@ run(function()
 							aimPosition = aimPosition + Vector3.new(0, VerticalOffset.Value, 0)
 						end
 						
-						if ShakeToggle.Enabled and ShakeAmount.Value > 0 then
-							local shake = Vector3.new(
-								(rng:NextNumber() - 0.5) * ShakeAmount.Value * 0.1,
-								(rng:NextNumber() - 0.5) * ShakeAmount.Value * 0.1,
-								(rng:NextNumber() - 0.5) * ShakeAmount.Value * 0.1
-							)
-							aimPosition = aimPosition + shake
-						end
 						local finalAimSpeed = getAimSpeed(AimSpeed.Value)
 						if StrafeMultiplier.Enabled and (inputService:IsKeyDown(Enum.KeyCode.A) or inputService:IsKeyDown(Enum.KeyCode.D)) then
 							finalAimSpeed = finalAimSpeed * 1.15 
+						end
+						
+						if ShakeToggle.Enabled and ShakeAmount.Value > 0 then
+							local shakeIntensity = ShakeAmount.Value / 10
+							local speedVariation = 1 + ((rng:NextNumber() - 0.5) * shakeIntensity * 3)
+							finalAimSpeed = finalAimSpeed * speedVariation
+							
+							local jitterAmount = ShakeAmount.Value * 0.15
+							local microJitter = Vector3.new(
+								(rng:NextNumber() - 0.5) * jitterAmount,
+								(rng:NextNumber() - 0.5) * jitterAmount,
+								(rng:NextNumber() - 0.5) * jitterAmount
+							)
+							aimPosition = aimPosition + microJitter
 						end
 						
 						if ThirdPersonAim.Enabled then
@@ -1612,9 +1618,9 @@ run(function()
 	
 	ShakeAmount = AimAssist:CreateSlider({
 		Name = 'Shake Amount',
-		Min = 0,
-		Max = 100,
-		Default = 10,
+		Min = 1,
+		Max = 10,
+		Default = 3,
 		Visible = false
 	})
 	
@@ -1785,17 +1791,23 @@ run(function()
 		return math.min(speed, 0.95)
 	end
 	
+	local function getTargetPart(ent)
+		if not ent or not ent.Character then return nil end
+		
+		if AimPart.Value == "Head" then
+			return ent.Character:FindFirstChild("Head") or ent.Head or ent.RootPart
+		elseif AimPart.Value == "Torso" then
+			return ent.Character:FindFirstChild("Torso") or ent.Character:FindFirstChild("UpperTorso") or ent.RootPart
+		else
+			return ent.RootPart
+		end
+	end
+	
 	local function getPredictedPosition(ent, origin)
 		if not ent or not ent.RootPart then return nil end
 		
-		local targetPart = ent.RootPart
-		if AimPart.Value == "Head" then
-			targetPart = ent.Character:FindFirstChild("Head") or ent.Head or ent.RootPart
-		elseif AimPart.Value == "Torso" then
-			targetPart = ent.Character:FindFirstChild("Torso") or ent.RootPart
-		end
-		
-		if not targetPart then return nil end
+		local targetBodyPart = getTargetPart(ent)
+		if not targetBodyPart then return nil end
 		
 		if PAMode.Value == 'Aero' then
 			local projSpeed = 100
@@ -1827,7 +1839,7 @@ run(function()
 			
 			local predictedPos = aerov4bad.predictStrafingMovement(
 				ent.Player,
-				targetPart,
+				targetBodyPart,
 				projSpeed,
 				gravity,
 				origin
@@ -1886,8 +1898,8 @@ run(function()
 				origin,
 				projSpeed,
 				gravity,
-				targetPart.Position,
-				targetPart.Velocity,
+				targetBodyPart.Position,
+				targetBodyPart.Velocity,
 				playerGravity,
 				ent.HipHeight,
 				ent.Jumping and 42.6 or nil,
@@ -1988,18 +2000,23 @@ run(function()
 							aimPosition = aimPosition + Vector3.new(0, VerticalOffset.Value, 0)
 						end
 						
-						if ShakeToggle.Enabled and ShakeAmount.Value > 0 then
-							local shake = Vector3.new(
-								(rng:NextNumber() - 0.5) * ShakeAmount.Value * 0.1,
-								(rng:NextNumber() - 0.5) * ShakeAmount.Value * 0.1,
-								(rng:NextNumber() - 0.5) * ShakeAmount.Value * 0.1
-							)
-							aimPosition = aimPosition + shake
-						end
-						
 						local finalAimSpeed = getAimSpeed(AimSpeed.Value)
 						if StrafeMultiplier.Enabled and (inputService:IsKeyDown(Enum.KeyCode.A) or inputService:IsKeyDown(Enum.KeyCode.D)) then
 							finalAimSpeed = finalAimSpeed * 1.15
+						end
+						
+						if ShakeToggle.Enabled and ShakeAmount.Value > 0 then
+							local shakeIntensity = ShakeAmount.Value / 10
+							local speedVariation = 1 + ((rng:NextNumber() - 0.5) * shakeIntensity * 3)
+							finalAimSpeed = finalAimSpeed * speedVariation
+							
+							local jitterAmount = ShakeAmount.Value * 0.15
+							local microJitter = Vector3.new(
+								(rng:NextNumber() - 0.5) * jitterAmount,
+								(rng:NextNumber() - 0.5) * jitterAmount,
+								(rng:NextNumber() - 0.5) * jitterAmount
+							)
+							aimPosition = aimPosition + microJitter
 						end
 						
 						local targetCFrame = CFrame.lookAt(gameCamera.CFrame.p, aimPosition)
@@ -2114,9 +2131,9 @@ run(function()
 	
 	ShakeAmount = ProjectileAimAssist:CreateSlider({
 		Name = 'Shake Amount',
-		Min = 0,
-		Max = 100,
-		Default = 10,
+		Min = 1,
+		Max = 10,
+		Default = 3,
 		Visible = false
 	})
 	
@@ -3251,7 +3268,6 @@ run(function()
     local AntiStuck
     local UIS = game:GetService("UserInputService")
     local runService = game:GetService("RunService")
-    local lighting = game:GetService("Lighting")
     local camera = workspace.CurrentCamera
     
     local function absoluteReset()
@@ -3263,13 +3279,9 @@ run(function()
     end
     
     AntiStuck = vape.Categories.Legit:CreateModule({
-        Name = 'Desire AntiStuck/FPS Booster',
+        Name = 'Desire AntiStuck',
         Function = function(callback)
             if callback then
-                pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level1 end)
-                lighting.ExposureCompensation = -0.5
-                lighting.FogEnd = 100000
-                
                 AntiStuck:Clean(UIS.InputBegan:Connect(function(input)
                     if input.KeyCode == Enum.KeyCode.LeftControl then
                         absoluteReset()
@@ -3285,7 +3297,7 @@ run(function()
                 end))
             end
         end,
-        Tooltip = 'Fixes camera/mouse freeze + FPS boost. Press Left Control to force reset'
+        Tooltip = 'Fixes camera/mouse freeze. Press Left Control to force reset'
     })
 end)
 	
@@ -5851,6 +5863,15 @@ run(function()
             end
         end
     })
+    ContinueSwingTime = Killaura:CreateSlider({
+        Name = 'Swing Duration',
+        Min = 0,  
+        Max = 5,  
+        Default = 1,
+        Decimal = 10,
+        Suffix = 's',
+        Visible = false
+    })
     CustomHitReg = Killaura:CreateToggle({
         Name = 'Custom Hit Reg',
         Tooltip = 'Limit how many hits per second',
@@ -5893,16 +5914,6 @@ run(function()
         Decimal = 5,
         Tooltip = 'checks if it can hit someone when they are in the air',
         Darker = true,
-        Visible = false
-    })
-    
-    ContinueSwingTime = Killaura:CreateSlider({
-        Name = 'Swing Duration',
-        Min = 0,  
-        Max = 5,  
-        Default = 1,
-        Decimal = 10,
-        Suffix = 's',
         Visible = false
     })
     SyncHits = Killaura:CreateToggle({
@@ -11577,6 +11588,31 @@ run(function()
 				end
 			end, r, false)
 		end,
+		midnight = function()
+			repeat
+				if not entitylib.isAlive then
+					task.wait(0.1)
+					continue
+				end
+				
+				if bedwars.AbilityController:canUseAbility('midnight') then
+					local plr = entitylib.EntityPosition({
+						Range = Legit.Enabled and 20 or 30,
+						Part = 'RootPart',
+						Players = true,
+						NPCs = false,
+						Sort = sortmethods.Distance
+					})
+				
+					if plr or not Legit.Enabled then
+						bedwars.AbilityController:useAbility('midnight')
+						task.wait(0.5)
+					end
+				end
+				
+				task.wait(0.1)
+			until not AutoKit.Enabled
+		end,
 		fisherman = function()
 			local old = bedwars.FishingMinigameController.startMinigame
 			bedwars.FishingMinigameController.startMinigame = function(_, _, result)
@@ -14276,15 +14312,12 @@ run(function()
     local tiered, nexttier = {}, {}
     local originalGetShop
     local shopItemsTracked = {}
+    local bypassApplied = false
     
     local function applyBypassToItem(item)
-        if item and type(item) == "table" then
-            if not tiered[item] then 
-                tiered[item] = item.tiered 
-            end
-            if not nexttier[item] then 
-                nexttier[item] = item.nextTier 
-            end
+        if item and type(item) == "table" and not shopItemsTracked[item] then
+            tiered[item] = item.tiered 
+            nexttier[item] = item.nextTier 
             item.nextTier = nil
             item.tiered = nil
             shopItemsTracked[item] = true
@@ -14301,69 +14334,32 @@ run(function()
         end
     end
     
-    local function getShopController()
-        local success, result = pcall(function()
-            local RuntimeLib = require(game:GetService("ReplicatedStorage"):WaitForChild("rbxts_include"):WaitForChild("RuntimeLib"))
-            if RuntimeLib then
-                return RuntimeLib.import(script, game:GetService("ReplicatedStorage"), "TS", "games", "bedwars", "shop", "bedwars-shop")
-            end
-        end)
-        
-        if success then
-            return result
-        end
-        
-        local shopModule = game:GetService("ReplicatedStorage"):FindFirstChild("TS"):FindFirstChild("games"):FindFirstChild("bedwars"):FindFirstChild("shop"):FindFirstChild("bedwars-shop")
-        if shopModule and shopModule:IsA("ModuleScript") then
-            return require(shopModule)
-        end
-        
-        return nil
-    end
-    
     ShopTierBypass = vape.Categories.Utility:CreateModule({
         Name = 'Shop Tier Bypass',
         Function = function(callback)
             if callback then
                 repeat task.wait() until store.shopLoaded or not ShopTierBypass.Enabled
-                if ShopTierBypass.Enabled then
+                if ShopTierBypass.Enabled and not bypassApplied then
+                    bypassApplied = true
+                    
                     for _, v in pairs(bedwars.Shop.ShopItems) do
-                        tiered[v] = v.tiered
-                        nexttier[v] = v.nextTier
-                        v.nextTier = nil
-                        v.tiered = nil
-                        shopItemsTracked[v] = true
+                        applyBypassToItem(v)
                     end
                     
                     if bedwars.Shop.getShop and not originalGetShop then
                         originalGetShop = bedwars.Shop.getShop
                         bedwars.Shop.getShop = function(...)
                             local result = originalGetShop(...)
-                            
                             if type(result) == "table" then
                                 applyBypassToTable(result)
                             end
-                            
                             return result
-                        end
-                    end
-                    
-                    local shopController = getShopController()
-                    if shopController and shopController.BedwarsShop and shopController.BedwarsShop.getShop then
-                        if not tiered["shopControllerHooked"] then
-                            tiered["shopControllerHooked"] = true
-                            local originalControllerGetShop = shopController.BedwarsShop.getShop
-                            shopController.BedwarsShop.getShop = function(...)
-                                local result = originalControllerGetShop(...)
-                                if type(result) == "table" then
-                                    applyBypassToTable(result)
-                                end
-                                return result
-                            end
                         end
                     end
                 end
             else
+                bypassApplied = false
+                
                 for item, _ in pairs(shopItemsTracked) do
                     if item and type(item) == "table" then
                         if tiered[item] ~= nil then
@@ -14373,13 +14369,6 @@ run(function()
                             item.nextTier = nexttier[item]
                         end
                     end
-                end
-                
-                if tiered["shopControllerHooked"] then
-                    local shopController = getShopController()
-                    if shopController and shopController.BedwarsShop and shopController.BedwarsShop.getShop then
-                    end
-                    tiered["shopControllerHooked"] = nil
                 end
                 
                 if originalGetShop then
@@ -19390,65 +19379,79 @@ run(function()
 end)
 
 run(function()
-	local BCR
-	local Value
-	local CpsConstants = nil
-	
-	BCR = vape.Categories.Blatant:CreateModule({
-		Name = "BlockCPSRemover",
-		Function = function(callback)
-			
-			if callback then
-				task.wait(1)
-				
-				pcall(function()
-					CpsConstants = require(replicatedStorage.TS['shared-constants']).CpsConstants
-				end)
-				
-				if not CpsConstants then
-					pcall(function()
-						CpsConstants = bedwars.CpsConstants
-					end)
-				end
-				
-				if CpsConstants then
-					local newCPS = Value.Value == 0 and 1000 or Value.Value
-					CpsConstants.BLOCK_PLACE_CPS = newCPS
-					
-					task.spawn(function()
-						while BCR.Enabled do
-							local currentValue = Value.Value == 0 and 1000 or Value.Value
-							if CpsConstants.BLOCK_PLACE_CPS ~= currentValue then
-								CpsConstants.BLOCK_PLACE_CPS = currentValue
-							end
-							task.wait(0.3)
-						end
-					end)
-				end
-				
-			else
-				if CpsConstants then
-					CpsConstants.BLOCK_PLACE_CPS = 12
-				end
-			end
-		end,
-		Tooltip = 'Simple CPS modifier'
-	})
-	
-	Value = BCR:CreateSlider({
-		Name = "CPS Limit",
-		Suffix = "CPS",
-		Tooltip = "Higher = faster but more ghost blocks",
-		Default = 67,
-		Min = 12,
-		Max = 100,
-		Function = function()
-			if BCR.Enabled and CpsConstants then
-				local newCPS = Value.Value == 0 and 1000 or Value.Value
-				CpsConstants.BLOCK_PLACE_CPS = newCPS
-			end
-		end,
-	})
+    local BCR
+    local Value
+    local CpsConstants = nil
+    local isMobileDevice = inputService.TouchEnabled and not inputService.KeyboardEnabled and not inputService.MouseEnabled
+    
+    BCR = vape.Categories.Blatant:CreateModule({
+        Name = "BlockCPSRemover",
+        Function = function(callback)
+            
+            if callback then
+                task.wait(1)
+                
+                pcall(function()
+                    CpsConstants = require(replicatedStorage.TS['shared-constants']).CpsConstants
+                end)
+                
+                if not CpsConstants then
+                    pcall(function()
+                        CpsConstants = bedwars.CpsConstants
+                    end)
+                end
+                
+                if CpsConstants then
+                    local newCPS = Value.Value == 0 and 1000 or Value.Value
+                    CpsConstants.BLOCK_PLACE_CPS = newCPS
+                    
+                    if isMobileDevice then
+                        for _, v in {'2', '5'} do
+                            pcall(function()
+                                BCR:Clean(lplr.PlayerGui.MobileUI[v].MouseButton1Down:Connect(function()
+                                    if CpsConstants then
+                                        local currentValue = Value.Value == 0 and 1000 or Value.Value
+                                        CpsConstants.BLOCK_PLACE_CPS = currentValue
+                                    end
+                                end))
+                            end)
+                        end
+                    end
+                    
+                    task.spawn(function()
+                        while BCR.Enabled do
+                            local currentValue = Value.Value == 0 and 1000 or Value.Value
+                            if CpsConstants.BLOCK_PLACE_CPS ~= currentValue then
+                                CpsConstants.BLOCK_PLACE_CPS = currentValue
+                            end
+                            task.wait(0.3)
+                        end
+                    end)
+                end
+                
+            else
+                if CpsConstants then
+                    CpsConstants.BLOCK_PLACE_CPS = 12
+                end
+            end
+        end,
+        Tooltip = 'Simple CPS modifier (Mobile + Desktop)'
+    })
+    
+    Value = BCR:CreateSlider({
+        Name = "CPS Limit",
+        Suffix = "CPS",
+        Tooltip = "Higher = faster but more ghost blocks",
+        Default = 67,
+        Min = 12,
+        Max = 100,
+        Function = function()
+            if BCR.Enabled and CpsConstants then
+                local newCPS = Value.Value == 0 and 1000 or Value.Value
+                CpsConstants.BLOCK_PLACE_CPS = newCPS
+            end
+        end,
+    })
 end)
 
 run(function()
@@ -20429,33 +20432,36 @@ run(function()
 					end
 				end))
 				
-				OG4v4v4v4:Clean(gameCamera:FindFirstChild("Viewmodel").ChildAdded:Connect(function(obj)
-					if obj.Name == "wool_orange" then
-						task.wait(0.01)
-						if obj:FindFirstChild('Handle') then
-							for i, texture in obj:FindFirstChild('Handle'):GetChildren() do
-								if texture:IsA('Texture') then
-									oldTexture[texture] = texture.Texture
-									oldColor[texture] = texture.Color3
-									texture.Texture = "rbxassetid://16991768606"
-									texture.Color3 = Color3.fromRGB(196, 40, 28)
+				local viewmodel = gameCamera:FindFirstChild("Viewmodel")
+				if viewmodel then
+					OG4v4v4v4:Clean(viewmodel.ChildAdded:Connect(function(obj)
+						if obj.Name == "wool_orange" then
+							task.wait(0.01)
+							if obj:FindFirstChild('Handle') then
+								for i, texture in obj:FindFirstChild('Handle'):GetChildren() do
+									if texture:IsA('Texture') then
+										oldTexture[texture] = texture.Texture
+										oldColor[texture] = texture.Color3
+										texture.Texture = "rbxassetid://16991768606"
+										texture.Color3 = Color3.fromRGB(196, 40, 28)
+									end
+								end
+							end
+						elseif obj.Name == "wool_pink" then
+							task.wait(0.01)
+							if obj:FindFirstChild('Handle') then
+								for i, texture in obj:FindFirstChild('Handle'):GetChildren() do
+									if texture:IsA('Texture') then
+										oldTexture[texture] = texture.Texture
+										oldColor[texture] = texture.Color3
+										texture.Texture = "rbxassetid://16991768606"
+										texture.Color3 = Color3.fromRGB(15, 185, 55)
+									end
 								end
 							end
 						end
-					elseif obj.Name == "wool_pink" then
-						task.wait(0.01)
-						if obj:FindFirstChild('Handle') then
-							for i, texture in obj:FindFirstChild('Handle'):GetChildren() do
-								if texture:IsA('Texture') then
-									oldTexture[texture] = texture.Texture
-									oldColor[texture] = texture.Color3
-									texture.Texture = "rbxassetid://16991768606"
-									texture.Color3 = Color3.fromRGB(15, 185, 55)
-								end
-							end
-						end
-					end
-				end))
+					end))
+				end
 				
 				OG4v4v4v4:Clean(lplr.Character.ChildAdded:Connect(function(obj)
 					if obj.Name == "wool_orange" then
@@ -23908,76 +23914,6 @@ run(function()
         Tooltip = "Delay between purchase attempts",
         Visible = false
     })
-end)
-
-run(function()
-	local ShopTaxBypasser
-	local oldDispatch
-	local oldtax
-	local oldadded
-	local olditems
-	local oldhook
-	local oldConnect
-	ShopTaxBypasser = vape.Categories.Blatant:CreateModule({
-		Name = "ShopTaxBypasser",
-		Function = function(callback)
-			if callback then
-				oldtax = bedwars.ShopTaxController.isTaxed
-				oldadded = bedwars.ShopTaxController.getAddedTax
-				olditems = bedwars.ShopTaxController.getTaxedItems
-				oldDispatch = bedwars.Store.dispatch
-				task.spawn(function()
-					bedwars.Store.dispatch = function(...)
-						local arg = select(2, ...)
-						if arg and typeof(arg) == 'table' and arg.type == 'IncrementTaxState'  then
-							return false
-						end 	
-						return oldDispatch(...)
-					end
-				end)
-				task.spawn(function()
-					bedwars.ShopTaxController.isTaxed = function(...)
-						return false
-					end
-				end)
-				task.spawn(function()
-					bedwars.ShopTaxController.getTaxedItems = function(...)
-						return {}
-					end
-				end)
-				task.spawn(function()
-					bedwars.ShopTaxController.getAddedTax = function(...)
-						return 0
-					end
-				end)
-
-				task.spawn(function()
-					if bedwars.ShopTaxController.taxStateUpdateEvent then
-						oldConnect = bedwars.ShopTaxController.taxStateUpdateEvent.Connect
-						bedwars.ShopTaxController.taxStateUpdateEvent.Connect = function() 
-							return {Disconnect = function() end}
-						end
-					end
-				end)
-				task.spawn(function()
-					bedwars.ShopTaxController.hasTax = false
-					bedwars.ShopTaxController.taxedItems = {}
-					bedwars.ShopTaxController.addedTaxMap = {}
-				end)
-			else
-				bedwars.Store.dispatch = oldDispatch
-				bedwars.ShopTaxController.isTaxed = oldtax
-				bedwars.ShopTaxController.getAddedTax = oldadded
-				bedwars.ShopTaxController.getTaxedItems = olditems
-				bedwars.ShopTaxController.taxStateUpdateEvent.Connect = oldConnect
-				oldDispatch = nil
-				oldtax = nil
-				oldadded = nil
-				olditems = nil
-				oldConnect = nil
-			end
-		end
-	})
 end)
 
 run(function()
@@ -35420,6 +35356,13 @@ run(function()
 	end
 	
 	local function characterAdded(char)
+		for _, item in pairs(addedItems) do
+			if item and item.Parent then
+				item:Destroy()
+			end
+		end
+		addedItems = {}
+		
 		task.wait(0.1)
 		char.Character.Archivable = true
 		local clone = char.Character:Clone()
@@ -35513,24 +35456,10 @@ run(function()
 		Name = 'LayeredClothing',
 		Function = function(callback)
 			if callback then
-				for _, item in pairs(addedItems) do
-					if item and item.Parent then
-						item:Destroy()
-					end
-				end
-				addedItems = {}
-				
 				LayeredClothing:Clean(entitylib.Events.LocalAdded:Connect(characterAdded))
 				if entitylib.isAlive then
 					characterAdded(entitylib.character)
 				end
-				
-				LayeredClothing:Clean(lplr.CharacterAdded:Connect(function()
-					task.wait(0.1) 
-					if entitylib.isAlive then
-						characterAdded(entitylib.character)
-					end
-				end))
 			else
 				for _, item in pairs(addedItems) do
 					if item and item.Parent then
