@@ -1315,6 +1315,12 @@ run(function()
 		return toolType == 'sword' or toolType == 'bow' or toolType == 'crossbow'
 	end
 	
+	local function isSword()
+		if not store.hand or not store.hand.tool then return false end
+		local toolType = store.hand.toolType
+		return toolType == 'sword'
+	end
+	
 	local AimAssist
 	local Targets
 	local Sort
@@ -1334,6 +1340,7 @@ run(function()
 	local ThirdPersonAim
 	local ShakeToggle
 	local ShakeAmount
+	local WorkWithProjectiles
 	
 	local rayCheck = RaycastParams.new()
 	rayCheck.FilterType = Enum.RaycastFilterType.Include
@@ -1382,7 +1389,14 @@ run(function()
 						return
 					end
 					
-					local validWeaponCheck = WorkWithAllItems.Enabled or hasValidWeapon()
+					local validWeaponCheck = false
+					if WorkWithAllItems.Enabled then
+						validWeaponCheck = true
+					elseif WorkWithProjectiles.Enabled then
+						validWeaponCheck = hasValidWeapon()
+					else
+						validWeaponCheck = isSword()
+					end
 					
 					if not (entitylib.isAlive and validWeaponCheck and ((not ClickAim.Enabled) or (workspace:GetServerTimeNow() - bedwars.SwordController.lastAttack) < 0.4)) then
 						lockedTarget = nil
@@ -1641,6 +1655,11 @@ run(function()
 	
 	StrafeMultiplier = AimAssist:CreateToggle({
 		Name = 'Strafe Boost'
+	})
+	
+	WorkWithProjectiles = AimAssist:CreateToggle({
+		Name = 'Work With Projectiles',
+		Default = false
 	})
 	
 	WorkWithAllItems = AimAssist:CreateToggle({
@@ -35343,26 +35362,19 @@ run(function()
 	local LayeredClothing
 	local desc
 	local myUserId = lplr.UserId
-	local addedItems = {}
 	
-	local function isLayeredClothingItem(item)
-		return item:GetAttribute('LayeredClothing') == true
-	end
-	
-	local function itemAdded(v)
-		if isLayeredClothingItem(v) then
-			return 
+	local function itemAdded(v, manual)
+		if (not v:GetAttribute('LayeredClothing')) and ((v:IsA('Accessory') and (not v:GetAttribute('InvItem')) and (not v:GetAttribute('ArmorSlot'))) or v:IsA('ShirtGraphic') or v:IsA('Shirt') or v:IsA('Pants') or v:IsA('BodyColors') or manual) then
+			repeat
+				task.wait()
+				v.Parent = game
+			until v.Parent == game
+			v:ClearAllChildren()
+			v:Destroy()
 		end
 	end
 	
 	local function characterAdded(char)
-		for _, item in pairs(addedItems) do
-			if item and item.Parent then
-				item:Destroy()
-			end
-		end
-		addedItems = {}
-		
 		task.wait(0.1)
 		char.Character.Archivable = true
 		local clone = char.Character:Clone()
@@ -35403,6 +35415,12 @@ run(function()
 		end
 
 		clone.Humanoid:ApplyDescriptionClientServer(desc)
+		
+		for _, v in char.Character:GetChildren() do
+			itemAdded(v)
+		end
+		
+		LayeredClothing:Clean(char.Character.ChildAdded:Connect(itemAdded))
 
 		for _, v in clone:WaitForChild('Animate'):GetChildren() do
 			if not char.Character:FindFirstChild('Animate') then return end
@@ -35419,26 +35437,24 @@ run(function()
 		for _, v in clone:GetChildren() do
 			v:SetAttribute('LayeredClothing', true)
 			if v:IsA('Accessory') then
-				local handle = v:FindFirstChild('Handle')
-				if handle and handle:IsA('MeshPart') then
-					for _, v2 in v:GetDescendants() do
-						if v2:IsA('Weld') and v2.Part1 then
-							v2.Part1 = char.Character[v2.Part1.Name]
-						end
+				for _, v2 in v:GetDescendants() do
+					if v2:IsA('Weld') and v2.Part1 then
+						v2.Part1 = char.Character[v2.Part1.Name]
 					end
-					v.Parent = char.Character
-					table.insert(addedItems, v)
 				end
+				v.Parent = char.Character
 			elseif v:IsA('ShirtGraphic') or v:IsA('Shirt') or v:IsA('Pants') or v:IsA('BodyColors') then
-				if v.ClassName == 'Shirt' or v.ClassName == 'Pants' then
-					local existing = char.Character:FindFirstChildOfClass(v.ClassName)
-					if not existing then
-						v.Parent = char.Character
-						table.insert(addedItems, v)
-					end
-				end
+				v.Parent = char.Character
 			elseif v.Name == 'Head' and char.Head:IsA('MeshPart') and (not char.Head:FindFirstChild('FaceControls')) then
+				char.Head.MeshId = v.MeshId
 			end
+		end
+
+		local localface = char.Character:FindFirstChild('face', true)
+		local cloneface = clone:FindFirstChild('face', true)
+		if localface and cloneface then
+			itemAdded(localface, true)
+			cloneface.Parent = char.Head
 		end
 		
 		originalDesc:SetEmotes(desc:GetEmotes())
@@ -35460,13 +35476,6 @@ run(function()
 				if entitylib.isAlive then
 					characterAdded(entitylib.character)
 				end
-			else
-				for _, item in pairs(addedItems) do
-					if item and item.Parent then
-						item:Destroy()
-					end
-				end
-				addedItems = {}
 			end
 		end,
 		Tooltip = 'Enables layered clothing from your Roblox avatar (client-sided)'
