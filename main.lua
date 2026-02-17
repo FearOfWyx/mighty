@@ -1,4 +1,3 @@
---This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.
 repeat task.wait() until game:IsLoaded()
 if shared.vape then shared.vape:Uninject() end
 
@@ -45,136 +44,103 @@ end
 local function validateSecurity()
     local HttpService = game:GetService("HttpService")
     
-    if not isfile('newvape/security/validated') then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "security error",
-            Text = "please use right log in first",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    local validationContent = readfile('newvape/security/validated')
-    local success, validationData = pcall(function()
-        return HttpService:JSONDecode(validationContent)
-    end)
-    
-    if not success or not validationData then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "security error",
-            Text = "corrupted validation file try to log in again",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    if not validationData.username then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "security error",
-            Text = "username missing from validation file",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    if not validationData.hwid then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "security error",
-            Text = "hwid missing from validation file",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    local currentHWID = getHWID()
-    if validationData.hwid ~= currentHWID then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "security error",
-            Text = "hwid changed. your hwid doesnt match try to log in again",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    local ACCOUNT_SYSTEM_URL = "https://raw.githubusercontent.com/poopparty/whitelistcheck/main/AccountSystem.lua"
-    
-    local function fetchAccounts()
-        local success, response = pcall(function()
-            return game:HttpGet(ACCOUNT_SYSTEM_URL)
+    if isfile('newvape/security/validated') then
+        local validationContent = readfile('newvape/security/validated')
+        local success, validationData = pcall(function()
+            return HttpService:JSONDecode(validationContent)
         end)
-        if success and response then
-            local accountsTable = loadstring(response)()
-            if accountsTable and accountsTable.Accounts then
-                return accountsTable.Accounts
+        
+        if success and validationData and validationData.account_type == "premium" then
+            if not validationData.username or not validationData.hwid then
+                return false, nil, nil
             end
+            
+            local currentHWID = getHWID()
+            if validationData.hwid ~= currentHWID then
+                return false, nil, nil
+            end
+            
+            local ACCOUNT_SYSTEM_URL = "https://raw.githubusercontent.com/poopparty/whitelistcheck/main/AccountSystem.lua"
+            
+            local function fetchAccounts()
+                local success, response = pcall(function()
+                    return game:HttpGet(ACCOUNT_SYSTEM_URL)
+                end)
+                if success and response then
+                    local accountsTable = loadstring(response)()
+                    if accountsTable and accountsTable.Accounts then
+                        return accountsTable.Accounts
+                    end
+                end
+                return nil
+            end
+            
+            local accounts = fetchAccounts()
+            if not accounts then
+                return false, nil, nil
+            end
+            
+            local accountValid = false
+            local accountActive = false
+            local accountHWID = nil
+            for _, account in pairs(accounts) do
+                if account.Username == validationData.username then
+                    accountValid = true
+                    accountActive = account.IsActive == true
+                    accountHWID = account.HWID
+                    break
+                end
+            end
+            
+            if not accountValid or not accountActive then
+                return false, nil, nil
+            end
+            
+            if accountHWID and currentHWID ~= accountHWID then
+                return false, nil, nil
+            end
+            
+            return true, validationData.username, "premium"
         end
-        return nil
     end
     
-    local accounts = fetchAccounts()
-    if not accounts then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "connection error",
-            Text = "cant verify account status",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    local accountValid = false
-    local accountActive = false
-    local accountHWID = nil
-    for _, account in pairs(accounts) do
-        if account.Username == validationData.username then
-            accountValid = true
-            accountActive = account.IsActive == true
-            accountHWID = account.HWID
-            break
+    if isfile('newvape/security/freekey.txt') then
+        local keyContent = readfile('newvape/security/freekey.txt')
+        local success, keyData = pcall(function()
+            return HttpService:JSONDecode(keyContent)
+        end)
+        
+        if success and keyData then
+            local currentHWID = getHWID()
+            if keyData.hwid ~= currentHWID then
+                return false, nil, nil
+            end
+            
+            local currentTime = os.time()
+            if currentTime > keyData.expiry then
+                return false, nil, nil
+            end
+            
+            return true, "free user", "free"
         end
     end
     
-    if not accountValid then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "access taken",
-            Text = "your account is no longer authorized",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    if not accountActive then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "account inactive",
-            Text = "your account is currently inactive",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    if accountHWID and currentHWID ~= accountHWID then
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "security error",
-            Text = "hwid mismatch detected",
-            Duration = 5
-        })
-        return false, nil
-    end
-    
-    return true, validationData.username
+    return false, nil, nil
 end
 
-local securityPassed, validatedUsername = validateSecurity()
+local securityPassed, validatedUsername, accountType = validateSecurity()
 if not securityPassed then
     return
 end
 
 shared.ValidatedUsername = validatedUsername
+shared.VapeAccountType = accountType
 
 local vape
 local loadstring = function(...)
 	local res, err = loadstring(...)
 	if err and vape then
-		vape:CreateNotification('Vape', 'Failed to load : '..err, 30, 'alert')
+		vape:CreateNotification('vape', 'failed to load: '..err, 30, 'alert')
 	end
 	return res
 end
@@ -189,6 +155,12 @@ local cloneref = cloneref or function(obj)
 	return obj
 end
 local playersService = cloneref(game:GetService('Players'))
+
+local BEDWARS_PLACE_IDS = {
+    [6872274481] = true,
+    [8444591321] = true,
+    [6872265039] = true
+}
 
 local function downloadFile(path, func)
 	if not isfile(path) then
@@ -212,9 +184,9 @@ local function downloadPremadeProfiles()
         makefolder('newvape/profiles/premade')
     end
     
-    local commit = readfile('newvape/profiles/commit.txt')
-    if not commit then
-        commit = 'main'
+    local commit = 'main'
+    if isfile('newvape/profiles/commit.txt') then
+        commit = readfile('newvape/profiles/commit.txt')
     end
     
     local success, response = pcall(function()
@@ -222,83 +194,32 @@ local function downloadPremadeProfiles()
     end)
     
     if success and response then
-        local files = httpService:JSONDecode(response)
+        local filesSuccess, files = pcall(function()
+            return httpService:JSONDecode(response)
+        end)
         
-        if type(files) == 'table' then
+        if filesSuccess and type(files) == 'table' then
             for _, file in pairs(files) do
                 if file.name and file.name:find('.txt') and file.name ~= 'commit.txt' then
                     local filePath = 'newvape/profiles/premade/'..file.name
                     
                     if not isfile(filePath) then
-                        if file.download_url then
-                            local downloadSuccess, fileContent = pcall(function()
+                        local downloadSuccess, fileContent = pcall(function()
+                            if file.download_url then
                                 return game:HttpGet(file.download_url, true)
-                            end)
-                            
-                            if downloadSuccess and fileContent and fileContent ~= '404: Not Found' then
-                                writefile(filePath, fileContent)
-                            end
-                        else
-                            local downloadSuccess, fileContent = pcall(function()
+                            else
                                 return game:HttpGet('https://raw.githubusercontent.com/poopparty/poopparty/'..commit..'/profiles/premade/'..file.name, true)
-                            end)
-                            
-                            if downloadSuccess and fileContent ~= '404: Not Found' then
-                                writefile(filePath, fileContent)
                             end
+                        end)
+                        
+                        if downloadSuccess and fileContent and fileContent ~= '404: Not Found' then
+                            writefile(filePath, fileContent)
                         end
                     end
                 end
             end
         end
-    else
-        local profiles = {
-            'aero6872274481.txt',
-            'aero6872265039.txt',
-        }
-        
-        for _, profileName in ipairs(profiles) do
-            local filePath = 'newvape/profiles/premade/'..profileName
-            if not isfile(filePath) then
-                local downloadSuccess, fileContent = pcall(function()
-                    return game:HttpGet('https://raw.githubusercontent.com/poopparty/poopparty/'..commit..'/profiles/premade/'..profileName, true)
-                end)
-                
-                if downloadSuccess and fileContent ~= '404: Not Found' then
-                    writefile(filePath, fileContent)
-                end
-            end
-        end
     end
-end
-
-local function checkAccountActive()
-    local ACCOUNT_SYSTEM_URL = "https://raw.githubusercontent.com/poopparty/whitelistcheck/main/AccountSystem.lua"
-    
-    local function fetchAccounts()
-        local success, response = pcall(function()
-            return game:HttpGet(ACCOUNT_SYSTEM_URL)
-        end)
-        if success and response then
-            local accountsTable = loadstring(response)()
-            if accountsTable and accountsTable.Accounts then
-                return accountsTable.Accounts
-            end
-        end
-        return nil
-    end
-    
-    local accounts = fetchAccounts()
-    if not accounts then 
-        return true 
-    end
-    
-    for _, account in pairs(accounts) do
-        if account.Username == shared.ValidatedUsername then
-            return account.IsActive == true
-        end
-    end
-    return false
 end
 
 local function finishLoading()
@@ -337,7 +258,13 @@ local function finishLoading()
 	if not shared.vapereload then
 		if not vape.Categories then return end
 		if vape.Categories.Main.Options['GUI bind indicator'].Enabled then
-			vape:CreateNotification('Finished Loading', 'wsg, '..shared.ValidatedUsername..'! '..(vape.VapeButton and 'Press the button in the top right to open GUI' or 'Press '..table.concat(vape.Keybind, ' + '):upper()..' to open GUI'), 5)
+			local greeting
+			if accountType == "premium" then
+				greeting = 'wsg, '..shared.ValidatedUsername..'! '..(vape.VapeButton and 'Press the button in the top right to open GUI' or 'Press '..table.concat(vape.Keybind, ' + '):upper()..' to open GUI')
+			else
+				greeting = 'loaded free version! '..(vape.VapeButton and 'press the button in the top right to open gui' or 'press '..table.concat(vape.Keybind, ' + '):upper()..' to open gui')
+			end
+			vape:CreateNotification('Aerov4', greeting, 5)
 		end
 	end
 end
@@ -358,18 +285,31 @@ shared.vape = vape
 
 if not shared.VapeIndependent then
 	loadstring(downloadFile('newvape/games/universal.lua'), 'universal')()
-	if isfile('newvape/games/'..game.PlaceId..'.lua') then
-		loadstring(readfile('newvape/games/'..game.PlaceId..'.lua'), tostring(game.PlaceId))(...)
+	
+	local gameFileName = tostring(game.PlaceId)..'.lua'
+	
+	if accountType == "free" and BEDWARS_PLACE_IDS[game.PlaceId] then
+		gameFileName = 'FREE'..tostring(game.PlaceId)..'.lua'
+	end
+	
+	if isfile('newvape/games/'..gameFileName) then
+		loadstring(readfile('newvape/games/'..gameFileName), tostring(game.PlaceId))(...)
 	else
 		if not shared.VapeDeveloper then
 			local suc, res = pcall(function()
-				return game:HttpGet('https://raw.githubusercontent.com/poopparty/poopparty/'..readfile('newvape/profiles/commit.txt')..'/games/'..game.PlaceId..'.lua', true)
+				return game:HttpGet('https://raw.githubusercontent.com/poopparty/poopparty/'..readfile('newvape/profiles/commit.txt')..'/games/'..gameFileName, true)
 			end)
+			
 			if suc and res ~= '404: Not Found' then
-				loadstring(downloadFile('newvape/games/'..game.PlaceId..'.lua'), tostring(game.PlaceId))(...)
+				if gameFileName:find('.lua') then
+					res = '--This watermark is used to delete the file if its cached, remove it to make the file persist after vape updates.\n'..res
+				end
+				writefile('newvape/games/'..gameFileName, res)
+				loadstring(res, tostring(game.PlaceId))(...)
 			end
 		end
 	end
+	
 	finishLoading()
 else
 	vape.Init = finishLoading
