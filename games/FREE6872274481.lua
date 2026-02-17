@@ -676,6 +676,10 @@ end)
 entitylib.start()
 
 run(function()
+	if not vape or not vape.Clean then
+		repeat task.wait(0.1) until vape and vape.Clean
+	end
+	
 	local KnitInit, Knit
 	repeat
 		KnitInit, Knit = pcall(function()
@@ -30912,19 +30916,6 @@ run(function()
 end)
 
 run(function()
-	local KnitInit, Knit
-	repeat
-		KnitInit, Knit = pcall(function()
-			return debug.getupvalue(require(game:GetService("Players").LocalPlayer.PlayerScripts.TS.knit).setup, 9)
-		end)
-		if KnitInit then break end
-		task.wait()
-	until KnitInit
-
-	if not debug.getupvalue(Knit.Start, 1) then
-		repeat task.wait() until debug.getupvalue(Knit.Start, 1)
-	end
-
 	local Players = game:GetService("Players")
 
 	shared.PERMISSION_CONTROLLER_HASANYPERMISSIONS_REVERT = shared.PERMISSION_CONTROLLER_HASANYPERMISSIONS_REVERT or Knit.Controllers.PermissionController.hasAnyPermissions
